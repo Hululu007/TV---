@@ -42,6 +42,7 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.FileWriter;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @RunWith(AndroidJUnit4.class)
@@ -290,7 +291,17 @@ public class TvAppearanceTouchTest {
                 assertTrue("The classic popular shelf follows categories", home.popularPosition() > home.categoriesPosition());
             });
             device.pressDPadDown();
-            main(() -> home.focusRow(home.historyPosition()));
+            AtomicBoolean contentFocused = new AtomicBoolean();
+            long focusDeadline = SystemClock.uptimeMillis() + 5000;
+            do {
+                instrumentation.runOnMainSync(() -> contentFocused.set(home.pageGrid().hasFocus()));
+                if (contentFocused.get()) break;
+                SystemClock.sleep(100);
+            } while (SystemClock.uptimeMillis() < focusDeadline);
+            main(() -> {
+                assertTrue("The first D-pad movement enters the production hero before selecting history", contentFocused.get());
+                home.focusRow(home.historyPosition());
+            });
             main(() -> {
                 assertEquals("Real content navigation hides the toolbar above continue watching", View.GONE, home.toolbar().getVisibility());
                 View history = rowView(home, home.historyPosition());
