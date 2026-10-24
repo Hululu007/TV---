@@ -3,10 +3,12 @@ package com.fongmi.android.tv.ui.activity;
 import android.annotation.SuppressLint;
 import android.app.SearchManager;
 import android.content.Intent;
+import android.graphics.Rect;
 import android.os.Bundle;
 import android.text.TextUtils;
 import android.view.KeyEvent;
 import android.view.LayoutInflater;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
 
@@ -107,6 +109,9 @@ public class HomeActivity extends BaseActivity implements CustomTitleView.Listen
     private Result mResult;
     private Clock mClock;
     private boolean mToolbarVisible = true;
+    private boolean mToolbarTouchActive;
+    private boolean mToolbarHideDeferred;
+    private final Rect mToolbarTouchBounds = new Rect();
     private boolean mRestoreRefreshFocus;
     private boolean mInitialFocusPending;
     private boolean mRefreshFeaturedFocus;
@@ -525,10 +530,15 @@ public class HomeActivity extends BaseActivity implements CustomTitleView.Listen
     }
 
     private void setToolbarVisible(boolean visible) {
+        // Do not hide navigation while its child owns a touch stream.
+        if (mToolbarTouchActive && !visible) {
+            mToolbarHideDeferred = true;
+            visible = true;
+        }
         // When toolbar is already meant to be shown, still force VISIBLE — a pending hide
         // animation's endAction can leave GONE and cause top nav to flash then disappear.
         if (mToolbarVisible == visible) {
-            if (visible && mBinding.toolbar.getVisibility() != View.VISIBLE) {
+            if (visible && (mBinding.toolbar.getVisibility() != View.VISIBLE || mToolbarTouchActive)) {
                 JetStreamAnimator.show(mBinding.toolbar, 0, -16, JetStreamAnimator.FOCUS_DURATION);
             }
             return;
@@ -704,6 +714,7 @@ public class HomeActivity extends BaseActivity implements CustomTitleView.Listen
         mHistoryAdapter.setItems(items, new BaseDiffCallback<History>());
         int header = mAdapter.indexOf(R.string.home_history);
         if (header >= 0) mAdapter.notifyArrayItemRangeChanged(header, 1);
+        if (mPosterHome != null) mPosterHome.updateHistoryOrder();
         if (items.isEmpty()) mPresenter.setDelete(false);
         if (mHistoryActions != null && mHistoryActions.isShowing()) return;
         if (mHistoryActionFocus != null) {
@@ -730,6 +741,7 @@ public class HomeActivity extends BaseActivity implements CustomTitleView.Listen
         History.delete(VodConfig.getCid());
         mPresenter.setDelete(false);
         mHistoryAdapter.clear();
+        if (mPosterHome != null) mPosterHome.updateHistoryOrder();
         getHistory();
         requestHistoryFocus(RecyclerView.NO_POSITION);
     }
@@ -879,6 +891,7 @@ public class HomeActivity extends BaseActivity implements CustomTitleView.Listen
             return;
         }
         mAdapter.removeItems(getHistoryIndex(), 1);
+        if (mPosterHome != null) mPosterHome.updateHistoryOrder();
         mPresenter.setDelete(false);
         requestHistoryFocus(RecyclerView.NO_POSITION);
     }
@@ -989,13 +1002,40 @@ public class HomeActivity extends BaseActivity implements CustomTitleView.Listen
     }
 
     @Override
-    public boolean dispatchKeyEvent(KeyEvent event) {
-        if (KeyUtil.isActionDown(event)) {
-            mInitialFocusPending = false;
-            mHistoryFocusGeneration++;
-            mHistoryActionFocus = null;
-            if (mFeaturedPresenter != null) mFeaturedPresenter.onUserInteraction();
+    public boolean dispatchTouchEvent(MotionEvent event) {
+        int action = event.getActionMasked();
+        if (action == MotionEvent.ACTION_DOWN) {
+            onHomeInteraction();
+            mToolbarHideDeferred = false;
+            mToolbarTouchActive = mBinding != null && mBinding.toolbar.isShown()
+                    && mBinding.toolbar.getGlobalVisibleRect(mToolbarTouchBounds)
+                    && mToolbarTouchBounds.contains(Math.round(event.getRawX()), Math.round(event.getRawY()));
+            if (mToolbarTouchActive) setToolbarVisible(true);
         }
+        try {
+            return super.dispatchTouchEvent(event);
+        } finally {
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+                boolean hideDeferred = mToolbarTouchActive && mToolbarHideDeferred;
+                mToolbarTouchActive = false;
+                mToolbarHideDeferred = false;
+                if (hideDeferred && mBinding != null && !mBinding.toolbar.hasFocus()) {
+                    setToolbarVisible(mBinding.recycler.getSelectedPosition() <= 0);
+                }
+            }
+        }
+    }
+
+    private void onHomeInteraction() {
+        mInitialFocusPending = false;
+        mHistoryFocusGeneration++;
+        mHistoryActionFocus = null;
+        if (mFeaturedPresenter != null) mFeaturedPresenter.onUserInteraction();
+    }
+
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        if (KeyUtil.isActionDown(event)) onHomeInteraction();
         if (event.getKeyCode() == KeyEvent.KEYCODE_MENU && BrowseExperienceSettings.isHistoryActionsEnabled()) {
             int position = getSelectedHistoryPosition(getHistoryIndex());
             if (position >= 0 && position < mHistoryAdapter.size()) {

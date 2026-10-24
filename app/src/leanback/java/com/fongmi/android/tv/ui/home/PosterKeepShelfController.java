@@ -74,6 +74,7 @@ final class PosterKeepShelfController implements PosterKeepPresenter.Listener {
     private final View decor;
     private final ViewTreeObserver.OnWindowFocusChangeListener windowFocusListener;
     private ArrayObjectAdapter page;
+    private Object insertionAnchor = R.string.home_recommend;
     private Holder boundHolder;
     private Future<?> task;
     private Runnable focusFallback = () -> { };
@@ -101,7 +102,21 @@ final class PosterKeepShelfController implements PosterKeepPresenter.Listener {
     }
 
     void attach(ArrayObjectAdapter page) {
+        attach(page, R.string.home_recommend);
+    }
+
+    void attach(ArrayObjectAdapter page, Object insertionAnchor) {
         this.page = page;
+        this.insertionAnchor = insertionAnchor;
+    }
+
+    void updateOrder() {
+        if (page == null) return;
+        int index = page.indexOf(row);
+        int anchor = page.indexOf(insertionAnchor);
+        if (index < 0 || anchor < 0) return;
+        int destination = anchor + 1 - (index < anchor ? 1 : 0);
+        if (index != destination) page.move(index, destination);
     }
 
     boolean isRow(Object item) {
@@ -192,9 +207,10 @@ final class PosterKeepShelfController implements PosterKeepPresenter.Listener {
         } else {
             // Never insert between the legacy history and recommendation sentinels:
             // HomeActivity still identifies its history row from the distance between them.
-            int recommendation = page.indexOf(R.string.home_recommend);
-            page.add(recommendation < 0 ? page.size() : recommendation + 1, row);
+            int anchor = page.indexOf(insertionAnchor);
+            page.add(anchor < 0 ? page.size() : anchor + 1, row);
         }
+        updateOrder();
         recoverFocus();
     }
 
