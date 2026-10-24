@@ -5,10 +5,8 @@ import android.os.Bundle;
 import android.view.View;
 
 import androidx.leanback.widget.ArrayObjectAdapter;
-import androidx.lifecycle.MutableLiveData;
 import com.fongmi.android.tv.R;
 import com.fongmi.android.tv.bean.History;
-import com.fongmi.android.tv.bean.Result;
 import com.fongmi.android.tv.model.SiteViewModel;
 import com.fongmi.android.tv.ui.custom.JetStreamVerticalGridView;
 import com.fongmi.android.tv.ui.home.PosterHomeController;
@@ -38,9 +36,8 @@ public final class TvHomePreviewActivity extends HomeActivity {
         if (fixture == null) throw new IllegalStateException("Production home fixture session is missing");
         fixture.installSites();
         SiteViewModel model = (SiteViewModel) HomePreviewFixtures.field(this, "mViewModel");
-        // Cancel the intentionally unavailable source query, then publish its offline result through the real observer.
-        model.init();
-        ((MutableLiveData<Result>) model.getResult()).setValue(Result.objectFrom("{\"class\":[{\"type_id\":\"movie\",\"type_name\":\"电影\"},{\"type_id\":\"tv\",\"type_name\":\"剧集\"}]}"));
+        // Use the production request path so later configuration refreshes also retain offline categories.
+        model.init().homeContent();
         replaceHistory(fixture.histories);
     }
 

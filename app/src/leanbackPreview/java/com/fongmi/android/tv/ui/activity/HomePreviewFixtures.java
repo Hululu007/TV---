@@ -25,10 +25,16 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
+import okhttp3.Protocol;
+import okhttp3.Response;
+import okhttp3.ResponseBody;
 
 /** Seeds the existing production caches and database, as the native browse tests do. */
 public final class HomePreviewFixtures {
+    private static final String HOME_SOURCE_URL = "https://tv-home-fixture.invalid/home";
+    private static final String HOME_SOURCE_CONTENT = "<rss><class><ty id=\"movie\">电影</ty><ty id=\"tv\">剧集</ty></class><list/></rss>";
     static Session active;
 
     private HomePreviewFixtures() { }
@@ -93,6 +99,12 @@ public final class HomePreviewFixtures {
             BrowseExperienceSettings.putPosterKeepShelfEnabled(false);
             BrowseExperienceSettings.putHistoryActionsEnabled(false);
             OkHttpClient offline = client.newBuilder().addInterceptor(chain -> {
+                if (chain.request().url().toString().equals(HOME_SOURCE_URL)) {
+                    return new Response.Builder().request(chain.request()).protocol(Protocol.HTTP_1_1)
+                            .code(200).message("OK")
+                            .body(ResponseBody.create(HOME_SOURCE_CONTENT, MediaType.get("application/xml; charset=utf-8")))
+                            .build();
+                }
                 throw new IOException("Intentional offline production home fixture");
             }).build();
             setField(OkHttp.get(), "client", offline);
@@ -135,6 +147,7 @@ public final class HomePreviewFixtures {
                 Site site = new Site();
                 site.setKey("preview-source-" + index);
                 site.setName("离线片库 " + (char) ('A' + index));
+                site.setApi(HOME_SOURCE_URL);
                 fixtures.add(site);
             }
             setField(VodConfig.get(), "sites", fixtures);

@@ -270,6 +270,13 @@ public class TvAppearanceTouchTest {
         Intent intent = new Intent(instrumentation.getTargetContext(), TvHomePreviewActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         TvHomePreviewActivity home = (TvHomePreviewActivity) instrumentation.startActivitySync(intent);
         try {
+            AtomicInteger categoryCount = new AtomicInteger();
+            long categoriesDeadline = SystemClock.uptimeMillis() + 5000;
+            do {
+                instrumentation.runOnMainSync(() -> categoryCount.set(((Result) HomePreviewFixtures.field(home, "mResult")).getTypes().size()));
+                if (categoryCount.get() == 2) break;
+                SystemClock.sleep(100);
+            } while (SystemClock.uptimeMillis() < categoriesDeadline);
             main(() -> {
                 assertEquals("The asynchronous production history query has the same fixture", 3, History.get().size());
                 assertEquals("The production library route has loaded source categories", 2, ((Result) HomePreviewFixtures.field(home, "mResult")).getTypes().size());
