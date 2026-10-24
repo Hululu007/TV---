@@ -9,7 +9,9 @@ scenes = ["01-home", "14-rex-spotlight", "15-rex-spotlight-touch-dpad", "16-rex-
           "00-controls-home", "02-navigation-touch-dpad", "03-chips-touch-dpad", "04-cards-touch-dpad",
           "05-grid-swipe", "06-search", "07-detail", "08-dialog", "09-playback", "09-settings",
           "10-settings-switched", "11-native-grid-probe", "12-library", "13-native-controls",
-          "21-retained-native-controls", "22-retained-dialog"]
+          "21-retained-native-controls", "22-retained-dialog",
+          "23-home-history-order", "24-home-toolbar-touch", "25-home-toolbar-longpress",
+          "26-home-toolbar-restored", "27-home-title-source", "28-home-empty-history"]
 assert (root / "light-11-recreated.png").is_file(), "Missing recreated light-theme home"
 for theme in ("dark", "light"):
     for scene in scenes:
@@ -42,7 +44,8 @@ for row, scene in enumerate(comparison_scenes):
             sheet.paste(screenshot.convert("RGB"), (column * 480, row * 294 + 24))
         draw.text((column * 480 + 8, row * 294 + 5), f"{theme}: {scene}", fill="#1a2030")
 sheet.save(root / "theme-comparison.png")
-rex_scenes = ["01-home", "14-rex-spotlight", "15-rex-spotlight-touch-dpad", "17-rex-mixed", "18-rex-mixed-touch-dpad", "20-rex-shelves"]
+rex_scenes = ["23-home-history-order", "24-home-toolbar-touch", "28-home-empty-history",
+              "01-home", "14-rex-spotlight", "15-rex-spotlight-touch-dpad", "17-rex-mixed", "18-rex-mixed-touch-dpad", "20-rex-shelves"]
 rex_sheet = Image.new("RGB", (1920, len(rex_scenes) * 564), "#e7e9ef")
 draw = ImageDraw.Draw(rex_sheet)
 for row, scene in enumerate(rex_scenes):

@@ -2,7 +2,7 @@ name: TV appearance and touch verification
 
 on:
   push:
-    branches: ['feat/tv-touch-light-theme', 'feat/tv-touch-light-theme-issue77']
+    branches: ['feat/tv-touch-light-theme', 'feat/tv-touch-light-theme-issue77', 'fix/home-history-order-touch']
   workflow_dispatch:
 
 permissions:

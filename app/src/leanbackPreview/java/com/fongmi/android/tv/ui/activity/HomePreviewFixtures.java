@@ -1,0 +1,176 @@
+package com.fongmi.android.tv.ui.activity;
+
+import android.content.Context;
+
+import com.fongmi.android.tv.BuildConfig;
+import com.fongmi.android.tv.api.DiscoverApi;
+import com.fongmi.android.tv.api.config.VodConfig;
+import com.fongmi.android.tv.bean.History;
+import com.fongmi.android.tv.bean.Site;
+import com.fongmi.android.tv.bean.Vod;
+import com.fongmi.android.tv.db.AppDatabase;
+import com.fongmi.android.tv.setting.BrowseExperienceSettings;
+import com.fongmi.android.tv.setting.Setting;
+import com.fongmi.android.tv.ui.rex.RexFeedLoader;
+import com.fongmi.android.tv.ui.rex.RexFeedResult;
+import com.fongmi.android.tv.ui.rex.RexSections;
+import com.fongmi.android.tv.utils.TmdbNetwork;
+import com.github.catvod.net.OkHttp;
+
+import java.io.IOException;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import okhttp3.OkHttpClient;
+
+/** Seeds the existing production caches and database, as the native browse tests do. */
+public final class HomePreviewFixtures {
+    static Session active;
+
+    private HomePreviewFixtures() { }
+
+    public static Session open(Context context) {
+        if (!BuildConfig.DEBUG || !context.getPackageName().endsWith(".preview")) {
+            throw new IllegalStateException("Home fixtures require the isolated preview application");
+        }
+        if (active != null) throw new IllegalStateException("A home fixture session is already active");
+        active = new Session();
+        return active;
+    }
+
+    public static Object field(Object target, String name) {
+        return access(target, name, null, false);
+    }
+
+    static void setField(Object target, String name, Object value) {
+        access(target, name, value, true);
+    }
+
+    private static Object access(Object target, String name, Object value, boolean write) {
+        Class<?> type = target instanceof Class<?> cls ? cls : target.getClass();
+        Object instance = target instanceof Class<?> ? null : target;
+        for (Class<?> owner = type; owner != null; owner = owner.getSuperclass()) {
+            try {
+                Field field = owner.getDeclaredField(name);
+                field.setAccessible(true);
+                if (write) { field.set(instance, value); return null; }
+                return field.get(instance);
+            } catch (NoSuchFieldException ignored) {
+            } catch (ReflectiveOperationException error) {
+                throw new IllegalStateException("Cannot access preview fixture field " + name, error);
+            }
+        }
+        throw new IllegalStateException("Missing preview fixture field " + type.getName() + "." + name);
+    }
+
+    public static final class Session implements AutoCloseable {
+        public final List<History> histories = new ArrayList<>();
+        private final boolean posterHome = BrowseExperienceSettings.isPosterHomeEnabled();
+        private final boolean keepShelf = BrowseExperienceSettings.isPosterKeepShelfEnabled();
+        private final boolean historyActions = BrowseExperienceSettings.isHistoryActionsEnabled();
+        private final int siteMode = Setting.getSiteMode();
+        private final OkHttpClient client = OkHttp.client();
+        private final Object tmdbClient = field(TmdbNetwork.class, "client");
+        private final Object sites = field(VodConfig.get(), "sites");
+        private final Object home = field(VodConfig.get(), "home");
+        private final Object config = field(VodConfig.get(), "config");
+        private final Map<Object, Object> discover = cache(DiscoverApi.class);
+        private final Map<Object, Object> rex = cache(RexFeedLoader.class);
+        private final Map<Object, Object> savedDiscover = new HashMap<>(discover);
+        private final Map<Object, Object> savedRex = new HashMap<>(rex);
+        private final int cid;
+        private final List<History> savedHistory;
+
+        private Session() {
+            VodConfig.get().init();
+            cid = VodConfig.getCid();
+            savedHistory = new ArrayList<>(AppDatabase.get().getHistoryDao().findAll(cid));
+            BrowseExperienceSettings.putPosterHomeEnabled(true);
+            BrowseExperienceSettings.putPosterKeepShelfEnabled(false);
+            BrowseExperienceSettings.putHistoryActionsEnabled(false);
+            OkHttpClient offline = client.newBuilder().addInterceptor(chain -> {
+                throw new IOException("Intentional offline production home fixture");
+            }).build();
+            setField(OkHttp.get(), "client", offline);
+            setField(TmdbNetwork.class, "client", offline);
+            discover.clear();
+            rex.clear();
+            List<Vod> popular = RexPreviewFixtures.feeds().get(0).getItems();
+            for (DiscoverApi.Row row : DiscoverApi.Row.values()) {
+                discover.put(row, entry(DiscoverApi.class, row == DiscoverApi.Row.TMDB_DAY ? popular : List.of()));
+            }
+            Map<String, List<Vod>> feeds = new HashMap<>();
+            for (RexFeedResult feed : RexPreviewFixtures.feeds()) feeds.put(feed.getSection().getKey(), feed.getItems());
+            for (com.fongmi.android.tv.bean.RexSection section : RexSections.home()) {
+                rex.put(section.getKey(), entry(RexFeedLoader.class, feeds.getOrDefault(section.getKey(), List.of())));
+            }
+            for (int index = 0; index < 3; index++) {
+                Vod vod = popular.get(index);
+                History history = new History();
+                history.setKey("preview-home" + AppDatabase.SYMBOL + vod.getId());
+                history.setVodName(vod.getName() + " · 续看");
+                history.setVodPic(vod.getBackdrop());
+                history.setVodRemarks("第 " + (index + 2) + " 集");
+                history.setPosition((index + 1) * 600_000L);
+                history.setDuration(3_600_000L);
+                history.setCreateTime(System.currentTimeMillis() - index * 1000L);
+                history.setCid(cid);
+                histories.add(history);
+            }
+            replaceHistory(true);
+        }
+
+        public void replaceHistory(boolean present) {
+            AppDatabase.get().getHistoryDao().delete(cid);
+            if (present) AppDatabase.get().getHistoryDao().insertOrUpdate(histories);
+        }
+
+        void installSites() {
+            List<Site> fixtures = new ArrayList<>();
+            for (int index = 0; index < 2; index++) {
+                Site site = new Site();
+                site.setKey("preview-source-" + index);
+                site.setName("离线片库 " + (char) ('A' + index));
+                fixtures.add(site);
+            }
+            setField(VodConfig.get(), "sites", fixtures);
+            setField(VodConfig.get(), "home", fixtures.get(0));
+        }
+
+        @Override public void close() {
+            AppDatabase.get().getHistoryDao().delete(cid);
+            AppDatabase.get().getHistoryDao().insertOrUpdate(savedHistory);
+            discover.clear(); discover.putAll(savedDiscover);
+            rex.clear(); rex.putAll(savedRex);
+            setField(OkHttp.get(), "client", client);
+            setField(TmdbNetwork.class, "client", tmdbClient);
+            setField(VodConfig.get(), "sites", sites);
+            setField(VodConfig.get(), "home", home);
+            setField(VodConfig.get(), "config", config);
+            BrowseExperienceSettings.putPosterHomeEnabled(posterHome);
+            BrowseExperienceSettings.putPosterKeepShelfEnabled(keepShelf);
+            BrowseExperienceSettings.putHistoryActionsEnabled(historyActions);
+            Setting.putSiteMode(siteMode);
+            active = null;
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<Object, Object> cache(Class<?> type) {
+        return (Map<Object, Object>) field(type, "CACHE");
+    }
+
+    private static Object entry(Class<?> owner, List<Vod> items) {
+        try {
+            Constructor<?> constructor = Class.forName(owner.getName() + "$CacheEntry").getDeclaredConstructor(List.class);
+            constructor.setAccessible(true);
+            return constructor.newInstance(items);
+        } catch (ReflectiveOperationException error) {
+            throw new IllegalStateException("Cannot seed production cache " + owner.getName(), error);
+        }
+    }
+}

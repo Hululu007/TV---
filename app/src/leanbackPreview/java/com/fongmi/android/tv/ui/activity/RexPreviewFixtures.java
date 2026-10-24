@@ -43,6 +43,7 @@ final class RexPreviewFixtures {
                 int style = (sectionIndex + i) % TITLES.length;
                 Vod item = new Vod();
                 item.setId("tmdb:movie:" + (1000 + sectionIndex * 100 + i));
+                item.setTypeName("movie");
                 item.setName(TITLES[style] + " " + (sectionIndex * 12 + i + 1));
                 item.setPic(posters[style]);
                 item.setBackdrop(backdrops[style]);

@@ -11,6 +11,10 @@ import android.os.Build;
 import android.view.KeyEvent;
 import android.view.View;
 import androidx.leanback.widget.HorizontalGridView;
+import androidx.leanback.widget.ArrayObjectAdapter;
+import androidx.leanback.widget.ItemBridgeAdapter;
+import androidx.leanback.widget.ListRow;
+import androidx.leanback.widget.ListRowPresenter;
 import androidx.recyclerview.widget.RecyclerView;
 import androidx.core.graphics.ColorUtils;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
@@ -22,6 +26,10 @@ import androidx.test.uiautomator.UiObject2;
 import com.fongmi.android.tv.R;
 import com.fongmi.android.tv.setting.Setting;
 import com.fongmi.android.tv.ui.activity.TvPreviewActivity;
+import com.fongmi.android.tv.ui.activity.TvHomePreviewActivity;
+import com.fongmi.android.tv.ui.activity.HomePreviewFixtures;
+import com.fongmi.android.tv.bean.History;
+import com.fongmi.android.tv.ui.presenter.HistoryPresenter;
 import com.fongmi.android.tv.ui.custom.JetStreamSettingView;
 import com.fongmi.android.tv.ui.custom.CustomKeyDownLive;
 import com.fongmi.android.tv.ui.custom.CustomKeyDownVod;
@@ -32,6 +40,7 @@ import org.junit.runner.RunWith;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.FileWriter;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @RunWith(AndroidJUnit4.class)
@@ -40,6 +49,7 @@ public class TvAppearanceTouchTest {
     private final UiDevice device = UiDevice.getInstance(instrumentation);
     private TvPreviewActivity activity;
     private File output;
+    private long touchDownTime;
 
     private void main(Runnable task) {
         instrumentation.runOnMainSync(task);
@@ -100,6 +110,7 @@ public class TvAppearanceTouchTest {
                 verifyPaletteContrast();
                 capture(theme + "-01-home");
                 verifyRexHome(theme);
+                verifyProductionHome(theme);
                 main(() -> activity.showPage("home"));
                 capture(theme + "-00-controls-home");
 
@@ -250,6 +261,171 @@ public class TvAppearanceTouchTest {
         } finally {
             main(() -> { activity.finish(); Setting.putLightTheme(false); Setting.putThemeColor(Setting.THEME_DEFAULT); });
         }
+    }
+
+    private void verifyProductionHome(String theme) throws Exception {
+        HomePreviewFixtures.Session[] session = new HomePreviewFixtures.Session[1];
+        main(() -> session[0] = HomePreviewFixtures.open(instrumentation.getTargetContext()));
+        Intent intent = new Intent(instrumentation.getTargetContext(), TvHomePreviewActivity.class).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        TvHomePreviewActivity home = (TvHomePreviewActivity) instrumentation.startActivitySync(intent);
+        try {
+            main(() -> {
+                assertEquals("The asynchronous production history query has the same fixture", 3, History.get().size());
+                ArrayObjectAdapter page = home.pageAdapter();
+                assertTrue("Classic offline data supplies the real first hero", home.controller().isHero(page.get(0)) && home.controller().isFocusable(page.get(0)));
+                assertTrue(page.get(home.historyPosition()) instanceof ListRow);
+                ListRow history = (ListRow) page.get(home.historyPosition());
+                assertTrue("Continue watching uses the production presenter", history.getAdapter().getPresenter(history) instanceof HistoryPresenter);
+                assertEquals(3, history.getAdapter().size());
+                assertTrue("Categories follow the entire continue-watching row", home.categoriesPosition() > home.historyPosition());
+                assertTrue("The classic popular shelf follows categories", home.popularPosition() > home.categoriesPosition());
+                home.focusRow(home.historyPosition());
+            });
+            main(() -> {
+                View history = rowView(home, home.historyPosition());
+                View categories = rowView(home, home.categoriesPosition());
+                View popular = rowView(home, home.popularPosition());
+                assertTrue("History and category surfaces do not overlap", history.getBottom() <= categories.getTop());
+                assertTrue("Category controls precede the popular shelf", categories.getBottom() <= popular.getTop());
+                assertTrue("Categories stay adjacent to history", categories.getTop() - history.getBottom() <= activity.dp(48));
+                assertTrue("The populated classic shelf keeps its measured content height", popular.getHeight() >= activity.dp(230));
+                ItemBridgeAdapter.ViewHolder bridge = (ItemBridgeAdapter.ViewHolder) home.pageGrid().findViewHolderForAdapterPosition(home.historyPosition());
+                ListRowPresenter presenter = (ListRowPresenter) bridge.getPresenter();
+                HorizontalGridView rail = ((ListRowPresenter.ViewHolder) presenter.getRowViewHolder(bridge.getViewHolder())).getGridView();
+                assertEquals("History cards retain their production geometry", activity.dp(112), rail.getChildAt(0).getHeight());
+            });
+            capture(theme + "-23-home-history-order");
+
+            device.pressBack();
+            SystemClock.sleep(700);
+            int[] keys = {R.string.home_tab_home, R.string.home_vod, R.string.home_discover, R.string.home_search, R.string.home_tab_my};
+            String[] routes = {null, "VodActivity", "DiscoverActivity", "SearchActivity", "MyActivity"};
+            for (int index = 0; index < keys.length; index++) {
+                int clicks = home.navClicks;
+                text(home.getString(index == 1 ? R.string.home_tab_library : keys[index])).click();
+                SystemClock.sleep(500);
+                assertEquals("The real toolbar activates on its first tap", clicks + 1, home.navClicks);
+                assertEquals(String.valueOf(keys[index]), home.lastNavKey);
+                if (routes[index] != null) assertRoute(home, routes[index]);
+                else main(() -> assertTrue("The production home action moves focus into content", home.pageGrid().hasFocus()));
+            }
+            text("片库").click();
+            SystemClock.sleep(400);
+            device.pressDPadRight(); device.pressDPadCenter();
+            SystemClock.sleep(400);
+            assertEquals("The real D-pad continues from the touched toolbar item", String.valueOf(R.string.home_discover), home.lastNavKey);
+            assertRoute(home, "DiscoverActivity");
+            capture(theme + "-24-home-toolbar-touch");
+
+            for (int index = 0; index < keys.length; index++) {
+                Rect bounds = text(home.getString(index == 1 ? R.string.home_tab_library : keys[index])).getVisibleBounds();
+                int longClicks = home.navLongClicks;
+                int clicks = home.navClicks;
+                device.swipe(bounds.centerX(), bounds.centerY(), bounds.centerX(), bounds.centerY(), 130);
+                SystemClock.sleep(350);
+                assertEquals("Each real toolbar item retains its source-menu long press", longClicks + 1, home.navLongClicks);
+                assertEquals(String.valueOf(keys[index]), home.lastLongKey);
+                assertEquals("Long press does not also route a tap", clicks, home.navClicks);
+                text("离线片库 A");
+                if (index == keys.length - 1) capture(theme + "-25-home-toolbar-longpress");
+                device.pressBack();
+                SystemClock.sleep(450);
+            }
+
+            Rect library = text("片库").getVisibleBounds();
+            int clicks = home.navClicks;
+            instrumentation.runOnMainSync(() -> {
+                home.queueNavRestore();
+                long queuedGeneration = home.focusGeneration();
+                dispatchTouch(home, library, android.view.MotionEvent.ACTION_DOWN);
+                assertTrue("Touch expires already queued navigation focus", home.focusGeneration() > queuedGeneration);
+                home.showToolbar(false);
+                assertTrue("Toolbar remains hittable throughout a touch stream", home.toolbar().getVisibility() == View.VISIBLE);
+                dispatchTouch(home, library, android.view.MotionEvent.ACTION_UP);
+            });
+            instrumentation.waitForIdleSync();
+            SystemClock.sleep(600);
+            assertEquals("Queued focus and hide cannot consume the toolbar tap", clicks + 1, home.navClicks);
+            assertRoute(home, "VodActivity");
+            device.pressDPadRight(); device.pressDPadCenter();
+            SystemClock.sleep(450);
+            assertRoute(home, "DiscoverActivity");
+
+            main(() -> home.focusRow(home.popularPosition()));
+            main(() -> assertEquals("Scrolling content hides the real toolbar", View.GONE, home.toolbar().getVisibility()));
+            main(() -> home.showToolbar(true));
+            Rect search = text("搜索").getVisibleBounds();
+            clicks = home.navClicks;
+            instrumentation.runOnMainSync(() -> {
+                dispatchTouch(home, search, android.view.MotionEvent.ACTION_DOWN);
+                home.showToolbar(false);
+                dispatchTouch(home, search, android.view.MotionEvent.ACTION_CANCEL);
+                assertFalse("Cancellation releases the toolbar guard", home.toolbarTouchActive());
+            });
+            instrumentation.waitForIdleSync();
+            SystemClock.sleep(500);
+            assertEquals("A canceled toolbar touch cannot navigate", clicks, home.navClicks);
+            main(() -> assertEquals("Cancellation permits the deferred content hide", View.GONE, home.toolbar().getVisibility()));
+            device.pressBack();
+            SystemClock.sleep(700);
+            text("搜索").click();
+            SystemClock.sleep(400);
+            assertRoute(home, "SearchActivity");
+            capture(theme + "-26-home-toolbar-restored");
+
+            int dialogs = home.sourceDialogs;
+            refreshAccessibility();
+            UiObject2 title = device.findObject(By.res(instrumentation.getTargetContext().getPackageName(), "title"));
+            assertNotNull("Production source switcher is visible", title);
+            title.click();
+            SystemClock.sleep(350);
+            assertEquals("The production title opens its source chooser on the first tap", dialogs + 1, home.sourceDialogs);
+            text("离线片库 A");
+            capture(theme + "-27-home-title-source");
+            device.pressBack();
+            SystemClock.sleep(450);
+
+            main(() -> { session[0].replaceHistory(false); home.replaceHistory(List.of()); home.focusRow(0); });
+            main(() -> {
+                assertTrue("The production history query is empty", History.get().isEmpty());
+                assertEquals(0, ((ArrayObjectAdapter) HomePreviewFixtures.field(home, "mHistoryAdapter")).size());
+                assertEquals("Empty history restores categories directly after the hero", 1, home.categoriesPosition());
+                View hero = rowView(home, 0);
+                View categories = rowView(home, home.categoriesPosition());
+                assertTrue("Empty history adds no blank header gap", categories.getTop() - hero.getBottom() <= home.pageGrid().getVerticalSpacing() + activity.dp(2));
+                assertTrue("Categories remain below the hero", categories.getTop() >= hero.getBottom());
+            });
+            capture(theme + "-28-home-empty-history");
+        } catch (Exception | AssertionError failure) {
+            try { capture("failure-production-home-" + theme); }
+            catch (Throwable captureFailure) { failure.addSuppressed(captureFailure); }
+            throw failure;
+        } finally {
+            main(home::finish);
+            long deadline = SystemClock.uptimeMillis() + 5000;
+            while (!home.isDestroyed() && SystemClock.uptimeMillis() < deadline) SystemClock.sleep(100);
+            main(() -> session[0].close());
+        }
+    }
+
+    private View rowView(TvHomePreviewActivity home, int position) {
+        RecyclerView.ViewHolder holder = home.pageGrid().findViewHolderForAdapterPosition(position);
+        assertNotNull("Production home row is laid out at " + position, holder);
+        return holder.itemView;
+    }
+
+    private void assertRoute(TvHomePreviewActivity home, String destination) {
+        assertNotNull("Production navigation emitted an Intent", home.lastNavigation);
+        assertEquals("com.fongmi.android.tv.ui.activity." + destination, home.lastNavigation.getComponent().getClassName());
+    }
+
+    private void dispatchTouch(TvHomePreviewActivity home, Rect bounds, int action) {
+        long time = SystemClock.uptimeMillis();
+        if (action == android.view.MotionEvent.ACTION_DOWN) touchDownTime = time;
+        android.view.MotionEvent event = android.view.MotionEvent.obtain(touchDownTime, time, action, bounds.centerX(), bounds.centerY(), 0);
+        event.setSource(android.view.InputDevice.SOURCE_TOUCHSCREEN);
+        home.dispatchTouchEvent(event);
+        event.recycle();
     }
 
     private void verifyRetainedNativeTheme(boolean light, String theme) throws Exception {

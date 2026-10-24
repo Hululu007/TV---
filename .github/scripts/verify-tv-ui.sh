@@ -40,6 +40,7 @@ adb shell wm density 320
 adb shell settings put secure immersive_mode_confirmations confirmed
 adb install -r "$apk"
 adb install -r "$test_apk"
+adb shell pm grant "$pkg" android.permission.POST_NOTIFICATIONS || true
 adb shell pm list instrumentation | tee "$out/runners.txt"
 grep -F "instrumentation:$test_pkg/androidx.test.runner.AndroidJUnitRunner (target=$pkg)" "$out/runners.txt"
 adb logcat -c
