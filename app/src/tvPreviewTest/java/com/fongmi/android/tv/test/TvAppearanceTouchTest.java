@@ -29,6 +29,7 @@ import com.fongmi.android.tv.ui.activity.TvPreviewActivity;
 import com.fongmi.android.tv.ui.activity.TvHomePreviewActivity;
 import com.fongmi.android.tv.ui.activity.HomePreviewFixtures;
 import com.fongmi.android.tv.bean.History;
+import com.fongmi.android.tv.bean.Result;
 import com.fongmi.android.tv.ui.presenter.HistoryPresenter;
 import com.fongmi.android.tv.ui.custom.JetStreamSettingView;
 import com.fongmi.android.tv.ui.custom.CustomKeyDownLive;
@@ -271,6 +272,7 @@ public class TvAppearanceTouchTest {
         try {
             main(() -> {
                 assertEquals("The asynchronous production history query has the same fixture", 3, History.get().size());
+                assertEquals("The production library route has loaded source categories", 2, ((Result) HomePreviewFixtures.field(home, "mResult")).getTypes().size());
                 ArrayObjectAdapter page = home.pageAdapter();
                 assertTrue("Classic offline data supplies the real first hero", home.controller().isHero(page.get(0)) && home.controller().isFocusable(page.get(0)));
                 assertTrue(page.get(home.historyPosition()) instanceof ListRow);
@@ -279,9 +281,11 @@ public class TvAppearanceTouchTest {
                 assertEquals(3, history.getAdapter().size());
                 assertTrue("Categories follow the entire continue-watching row", home.categoriesPosition() > home.historyPosition());
                 assertTrue("The classic popular shelf follows categories", home.popularPosition() > home.categoriesPosition());
-                home.focusRow(home.historyPosition());
             });
+            device.pressDPadDown();
+            main(() -> home.focusRow(home.historyPosition()));
             main(() -> {
+                assertEquals("Real content navigation hides the toolbar above continue watching", View.GONE, home.toolbar().getVisibility());
                 View history = rowView(home, home.historyPosition());
                 View categories = rowView(home, home.categoriesPosition());
                 View popular = rowView(home, home.popularPosition());

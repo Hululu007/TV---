@@ -113,14 +113,6 @@ public final class PosterHomeController implements VodPresenter.OnClickListener 
 
     /** Bind an already-loaded Rex feed snapshot without scheduling source requests. */
     public void attachSnapshot(ArrayObjectAdapter adapter, List<RexFeedResult> results) {
-        attachSnapshot(adapter, results, Map.of());
-    }
-
-    /** Include existing discovery shelves in an offline snapshot of the production home. */
-    public void attachSnapshot(ArrayObjectAdapter adapter, List<RexFeedResult> results,
-                               Map<DiscoverApi.Row, List<Vod>> discovery) {
-        content.clear();
-        if (discovery != null) content.putAll(discovery);
         attachRows(adapter);
         applyRexResults(results);
         render();
