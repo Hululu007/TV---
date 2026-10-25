@@ -157,7 +157,7 @@ class JetStreamVodControlView @JvmOverloads constructor(
     private var tertiaryText by mutableStateOf("")
     private var playing by mutableStateOf(false)
     private var livePlayback by mutableStateOf(false)
-    private var timeshiftEnabled by mutableStateOf(false)
+    private var timeshiftAvailable by mutableStateOf(false)
     private var repeating by mutableStateOf(false)
     private var previousVisible by mutableStateOf(true)
     private var nextVisible by mutableStateOf(true)
@@ -219,7 +219,7 @@ class JetStreamVodControlView @JvmOverloads constructor(
     }
 
     fun setTimeshiftEnabled(enabled: Boolean) {
-        timeshiftEnabled = enabled
+        timeshiftAvailable = enabled
     }
 
     fun setPlaybackState(isPlaying: Boolean, isRepeating: Boolean) {
@@ -652,7 +652,7 @@ class JetStreamVodControlView @JvmOverloads constructor(
                     )
                     ControllerText(formatTime(durationMs))
                 }
-                if (timeshiftEnabled) {
+                if (timeshiftAvailable) {
                     Spacer(Modifier.width(10.dp))
                     ControlIcon(
                         icon = R.drawable.msr_live_tv,
