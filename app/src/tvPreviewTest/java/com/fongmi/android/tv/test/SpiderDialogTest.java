@@ -230,6 +230,11 @@ public final class SpiderDialogTest {
                 calls.add(noActivity);
                 assertTrue(noActivity.get(5, TimeUnit.SECONDS) instanceof com.github.catvod.crawler.SpiderNull);
                 Init.setActivity(() -> activity);
+                ListenableFuture<com.github.catvod.crawler.Spider> cancelledInit = Task.submit(() -> cached.getSpider("cold-dialog-fixture", base + "/init-dialog.js", ext, ""), 2000);
+                calls.add(cancelledInit);
+                text("Initialization login");
+                cancelledInit.cancel(true);
+                absent("Initialization login");
                 ListenableFuture<com.github.catvod.crawler.Spider> coldManual = Task.submit(() -> cached.getSpider("cold-dialog-fixture", base + "/init-dialog.js", ext, ""), 2000);
                 calls.add(coldManual);
                 text("Initialization login");

@@ -18,6 +18,7 @@ import com.github.catvod.crawler.SpiderRuntime;
 import com.github.catvod.utils.Json;
 import com.github.catvod.utils.UriUtil;
 import com.github.catvod.utils.Util;
+import com.google.common.util.concurrent.Uninterruptibles;
 import com.whl.quickjs.wrapper.JSArray;
 import com.whl.quickjs.wrapper.JSObject;
 import com.whl.quickjs.wrapper.QuickJSContext;
@@ -214,14 +215,16 @@ public class Spider extends com.github.catvod.crawler.Spider {
     }
 
     private void releaseJS() throws Exception {
-        submit(() -> {
+        // Caller cancellation must not skip the queued JS-thread cleanup before shutdownNow.
+        // Guava waits for cleanup and then restores the caller's interrupt flag.
+        Uninterruptibles.getUninterruptibly(submit(() -> {
             if (dialogs != null) dialogs.close();
             if (network != null) network.close();
             if (global != null) global.destroy();
             if (jsObject != null) jsObject.release();
             if (ctx != null) ctx.destroy();
             return null;
-        }).get();
+        }));
     }
 
     private void initializeJS() throws Exception {
