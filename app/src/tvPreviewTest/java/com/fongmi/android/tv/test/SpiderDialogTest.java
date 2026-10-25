@@ -161,6 +161,9 @@ public final class SpiderDialogTest {
     @Test public void quickJsDialogsSurviveAsyncNetworkingAndStayWithTheirCaller() throws Exception {
         boolean logging = QuickLog.isEnabled();
         QuickLog.putEnabled(true);
+        // This preview contains real x86 QuickJS, but deliberately no Python native runtime.
+        com.fongmi.android.tv.api.loader.PyLoader unusedPython = new com.fongmi.android.tv.api.loader.PyLoader();
+        unusedPython.clear();
         Fixture server = new Fixture();
         Spider spider = null;
         try {

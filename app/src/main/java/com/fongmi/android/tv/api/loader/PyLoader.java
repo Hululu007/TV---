@@ -12,12 +12,21 @@ import java.util.concurrent.ConcurrentHashMap;
 public class PyLoader {
 
     private final ConcurrentHashMap<String, Spider> spiders;
-    private final Loader loader;
+    private volatile Loader loader;
     private volatile String recent;
 
     public PyLoader() {
         spiders = new ConcurrentHashMap<>();
-        loader = new Loader();
+    }
+
+    /** Clearing configuration or using another source language must not start Python. */
+    private Loader loader() {
+        Loader current = loader;
+        if (current != null) return current;
+        synchronized (this) {
+            if (loader == null) loader = new Loader();
+            return loader;
+        }
     }
 
     public void clear() {
@@ -33,7 +42,7 @@ public class PyLoader {
     public Spider getSpider(String key, String api, String ext) {
         Spider created = spiders.computeIfAbsent(key, k -> {
             try {
-                Spider spider = loader.spider(api);
+                Spider spider = loader().spider(api);
                 spider.siteKey = key;
                 spider.init(App.get(), ext);
                 return spider;
