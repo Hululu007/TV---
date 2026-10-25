@@ -5,6 +5,7 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import com.github.catvod.Init;
 import com.github.catvod.crawler.SpiderDebug;
+import com.github.catvod.utils.CompletableFutures;
 import com.github.catvod.utils.Json;
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
@@ -233,7 +234,7 @@ implements AutoCloseable {
         Object object = this.lock;
         synchronized (object) {
             if (this.closed) {
-                return CompletableFuture.failedFuture(new InterruptedIOException("Network owner closed"));
+                return CompletableFutures.failedFuture(new InterruptedIOException("Network owner closed"));
             }
         }
         return this.cache.cached(key, CacheOptions.from((String)options), loader);
@@ -490,7 +491,7 @@ implements AutoCloseable {
             call = this.newCall(url, NetOptions.from(json));
         }
         catch (Exception e) {
-            return CompletableFuture.failedFuture(e);
+            return CompletableFutures.failedFuture(e);
         }
         future.whenComplete((result, error) -> {
             if (future.isCancelled()) {

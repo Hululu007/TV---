@@ -57,9 +57,9 @@ public final class Dialog implements AutoCloseable {
 
     /** Nonblocking bridge used by runtimes which must keep their event loop available. */
     public CompletableFuture<String> open(String options, Function<String, CompletableFuture<String>> onAction) {
-        if (closed) return CompletableFuture.failedFuture(new IllegalStateException("Dialog owner is closed"));
+        if (closed) return CompletableFutures.failedFuture(new IllegalStateException("Dialog owner is closed"));
         if (options == null || options.length() > 2 * 1024 * 1024) {
-            return CompletableFuture.failedFuture(new IllegalArgumentException("Dialog options exceed the supported size"));
+            return CompletableFutures.failedFuture(new IllegalArgumentException("Dialog options exceed the supported size"));
         }
         CompletableFuture<String> source;
         try {
@@ -68,7 +68,7 @@ public final class Dialog implements AutoCloseable {
             source = Init.dialog(options, onAction);
             if (source == null) throw new IllegalStateException("Dialog host returned no request");
         } catch (RuntimeException error) {
-            return CompletableFuture.failedFuture(error);
+            return CompletableFutures.failedFuture(error);
         }
         requests.add(source);
         source.whenComplete((value, error) -> requests.remove(source));

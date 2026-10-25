@@ -2,6 +2,7 @@ package com.github.catvod;
 
 import android.content.Context;
 import android.app.Activity;
+import com.github.catvod.utils.CompletableFutures;
 import java.util.function.Consumer;
 import java.util.function.BiFunction;
 import java.util.function.Function;
@@ -55,7 +56,7 @@ public class Init {
 
     public static CompletableFuture<String> dialog(String options, Function<String, CompletableFuture<String>> onAction) {
         var host = get().dialog;
-        if (host == null) return CompletableFuture.failedFuture(new UnsupportedOperationException("Dialog requires a compatible App"));
+        if (host == null) return CompletableFutures.failedFuture(new UnsupportedOperationException("Dialog requires a compatible App"));
         return host.apply(options, onAction);
     }
 
