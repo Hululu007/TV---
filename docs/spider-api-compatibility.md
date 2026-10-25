@@ -14,6 +14,20 @@
 
 增加宿主辅助类时，普通父优先加载可能遮住旧 JAR 中同名但不同版本的类。`SpiderClassLoader` 仅对本次新增的 Result、Vod、Class、Filter、Sub、Danmaku、Crypto 采用源内优先查找；Spider、Net、Local、OkHttp 和已有宿主类保持父优先，避免类身份冲突。
 
+## 原始 HTTP 请求体
+
+`net.req` / `net.http` 的 `body` 支持文本和 **0～255 整数数组**，数组按原始字节发送，不经过字符编码。使用 `body` 时必须提供 `Content-Type`，且不能同时提供 `data`。`buffer` 只控制响应格式，与请求体无关。协议参考 [FongMi 二进制请求体支持](https://github.com/FongMi/TV/commit/ff40eddb972d312a65a7ae9d0893d1086e5329f0)。
+
+Java 将以下选项 JSON 传入 `net.req(url, options)`；Python 和 QuickJS 可直接使用相同结构的字典/对象：
+
+```json
+{"method":"POST","headers":{"Content-Type":"application/octet-stream"},"body":[0,127,128,255]}
+```
+
+Python 的 `bytes` 可用 `list(payload)` 转成整数列表，QuickJS 的 `ArrayBuffer` 可用 `Array.from(new Uint8Array(payload))` 转成数组。Java 从 `byte[]` 生成 JSON 数组时，用 `value & 255` 转成无符号整数。空数组发送空请求体；越界、非整数和嵌套元素在发送前拒绝。`req` 返回现有的 `error` 字段，`json` 按原有约定抛出请求错误。
+
+原有文本 `body` 继续遵循声明的字符集，JSON/表单仍通过 `data` 发送。WebSocket 的 `body` 保持文本语义，HTTP 字节数组不会隐式变成 WebSocket 消息。Python/QuickJS 的请求、异步 HTTP/JSON 和批量接口共用已有 JSON 桥接，不改变旧源的全局 `req` / `http` 或 `requests` 辅助方法。
+
 ## 验证入口
 
 - JVM：`:catvod:testDebugUnitTest`、`:quickjs:testDebugUnitTest`。
