@@ -94,7 +94,7 @@ public class Updater implements UpdateListener, DefaultLifecycleObserver {
             UpdatePolicy policy = manual ? null : repository.policy();
             App.post(() -> checked(result, policy));
         } catch (Exception e) {
-            App.post(() -> failed(R.string.update_check_failed));
+            App.post(() -> failed(R.string.update_check_failed, e));
         }
     }
 
@@ -125,7 +125,7 @@ public class Updater implements UpdateListener, DefaultLifecycleObserver {
                     .desc(result.desc).listener(this).show(activity);
             Prefers.put(LAST_PROMPT, result.code);
         } catch (Exception e) {
-            failed(R.string.update_check_failed);
+            failed(R.string.update_check_failed, e);
         }
     }
 
@@ -134,7 +134,8 @@ public class Updater implements UpdateListener, DefaultLifecycleObserver {
         if (closed || downloading || manifest == null || !canShow()) return;
         downloading = true;
         view.setEnabled(false);
-        downloader = new UpdateDownloader(client());
+        final UpdateDownloader download = new UpdateDownloader(client());
+        downloader = download;
         // Capture immutable values: lifecycle cleanup can clear the Activity while this runs.
         UpdateManifest release = manifest;
         File destination = Path.cache("ota/update-" + release.code + "-" + System.nanoTime() + ".apk");
@@ -143,14 +144,35 @@ public class Updater implements UpdateListener, DefaultLifecycleObserver {
             try {
                 CacheManager.clearOldUpdates(System.currentTimeMillis() - CHECK_INTERVAL);
                 DiagnosticLog.record("ota", "download code=" + release.code);
-                File file = downloader.download(UpdateSources.mirrors(release.asset.url),
+                File file = download.download(UpdateSources.mirrors(release.asset.url),
                         destination, release.asset.size, release.asset.sha256,
-                        validator, percent -> App.post(() -> {
-                            if (!closed && dialog != null) dialog.setProgress(percent);
-                        }));
+                        validator, new UpdateDownloader.Progress() {
+                            @Override
+                            public void update(int percent) {
+                                App.post(() -> {
+                                    if (!closed && dialog != null) dialog.setProgress(percent);
+                                });
+                            }
+
+                            @Override
+                            public void onSource(int attempt, int total) {
+                                DiagnosticLog.record("ota", "download source=" + attempt + "/" + total);
+                                App.post(() -> {
+                                    if (!closed && dialog != null) dialog.setSource(attempt, total);
+                                });
+                            }
+
+                            @Override
+                            public void onVerifying() {
+                                DiagnosticLog.record("ota", "verifying code=" + release.code);
+                                App.post(() -> {
+                                    if (!closed && dialog != null) dialog.setVerifying();
+                                });
+                            }
+                        });
                 App.post(() -> install(file));
             } catch (Exception e) {
-                App.post(() -> failed(R.string.update_download_failed));
+                App.post(() -> failed(downloadFailureMessage(e), e));
             }
         });
     }
@@ -165,14 +187,55 @@ public class Updater implements UpdateListener, DefaultLifecycleObserver {
             CacheLease.protectFor(file, 10 * 60_000L);
             FileUtil.openFile(file);
         } catch (Exception e) {
+            DiagnosticLog.record("ota", "failed stage=install type=" + e.getClass().getSimpleName());
             Notify.show(R.string.update_install_failed);
         }
     }
 
-    private void failed(int message) {
-        if (!closed) DiagnosticLog.record("ota", "failed stage=" + (downloading ? "download" : "check"));
+    private int downloadFailureMessage(Exception error) {
+        if (error instanceof UpdateDownloader.LocalFileException) return R.string.update_download_storage_failed;
+        if (error instanceof UpdateApkValidator.ValidationException) {
+            switch (((UpdateApkValidator.ValidationException) error).getReason()) {
+                case PACKAGE: return R.string.update_download_wrong_package;
+                case VERSION: return R.string.update_download_wrong_version;
+                case SIGNATURE: return R.string.update_download_wrong_signature;
+                case ABI: return R.string.update_download_wrong_abi;
+                case PARSE: return R.string.update_download_invalid_apk;
+            }
+        }
+        return R.string.update_download_failed;
+    }
+
+    private void failed(int message, Exception error) {
+        if (!closed) {
+            DiagnosticLog.record("ota", "failed stage=" + (downloading ? "download" : "check")
+                    + " type=" + error.getClass().getSimpleName() + " reason=" + failureReason(error));
+            for (Throwable failure : error.getSuppressed()) {
+                DiagnosticLog.record("ota", "source failed type=" + failure.getClass().getSimpleName()
+                        + " reason=" + failureReason(failure));
+            }
+        }
         if (!closed && canShow() && (manual || downloading)) Notify.show(message);
         finish();
+    }
+
+    private String failureReason(Throwable error) {
+        if (error instanceof UpdateApkValidator.ValidationException) {
+            return ((UpdateApkValidator.ValidationException) error).getReason().name();
+        }
+        if (error instanceof UpdateDownloader.LocalFileException) return "STORAGE";
+        // Only emit known reason codes; transport errors can include URLs or request details.
+        String message = error.getMessage();
+        if ("All update download sources failed".equals(message)) return "ALL_SOURCES";
+        if ("Update SHA-256 mismatch".equals(message)) return "CHECKSUM";
+        if ("Incomplete update download".equals(message)) return "INCOMPLETE";
+        if ("Unexpected update response size".equals(message) || "Update exceeds expected size".equals(message)) return "SIZE";
+        if ("Update source returned a document instead of an APK".equals(message)) return "DOCUMENT";
+        if ("Update source returned an invalid APK header".equals(message)) return "HEADER";
+        if ("Empty update response".equals(message)) return "EMPTY";
+        if ("Update download cancelled".equals(message)) return "CANCELLED";
+        if (message != null && message.matches("Update HTTP [0-9]{3}")) return "HTTP";
+        return "REQUEST";
     }
 
     @Override
