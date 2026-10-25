@@ -383,7 +383,8 @@ public class TimeshiftPlaybackAndroidTest {
 
         @Override protected State getState() {
             List<MediaItemData> items = item == null ? List.of() : List.of(new MediaItemData.Builder("fixture-live")
-                    .setMediaItem(item).setDurationUs(C.TIME_UNSET).setIsDynamic(true).setWindowStartTimeMs(windowStartTimeMs).build());
+                    .setMediaItem(item).setLiveConfiguration(MediaItem.LiveConfiguration.UNSET)
+                    .setDurationUs(C.TIME_UNSET).setIsDynamic(true).setWindowStartTimeMs(windowStartTimeMs).build());
             return new State.Builder().setAvailableCommands(new Player.Commands.Builder().addAll(
                             Player.COMMAND_GET_CURRENT_MEDIA_ITEM, Player.COMMAND_GET_TIMELINE,
                             Player.COMMAND_PLAY_PAUSE, Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM,
