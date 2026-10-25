@@ -17,8 +17,7 @@ public class Async {
     };
 
     private final JSCallFunction error = args -> {
-        String msg = args != null && args.length > 0 && args[0] != null ? args[0].toString() : "";
-        future.completeExceptionally(new Exception(msg));
+        reject(args != null && args.length > 0 ? args[0] : null);
         return null;
     };
 
@@ -51,6 +50,35 @@ public class Async {
         }
     }
 
+    private void reject(Object value) {
+        Throwable failure;
+        try {
+            String message = value instanceof JSObject object ? rejectionMessage(object)
+                    : value == null ? "" : value.toString();
+            failure = new Exception(message);
+        } catch (Throwable error) {
+            failure = error;
+        }
+        if (value instanceof JSObject object) {
+            try {
+                object.release();
+            } catch (Throwable error) {
+                if (error != failure) failure.addSuppressed(error);
+            }
+        }
+        future.completeExceptionally(failure);
+    }
+
+    private String rejectionMessage(JSObject reason) {
+        // Error.toString() re-enters JS; a throwing getter/converter must not escape the callback.
+        Object message = reason.getProperty("message");
+        if (message instanceof JSObject object) {
+            object.release();
+            return "JavaScript promise rejected";
+        }
+        return message == null ? "JavaScript promise rejected" : message.toString();
+    }
+
     private CompletableFuture<Object> call(JSObject object, String name, Object... args) {
         JSFunction func = object.getJSFunction(name);
         if (func == null) return empty();
@@ -81,20 +109,16 @@ public class Async {
             complete(promise);
         } else {
             try {
-                consume(then, success);
-                consume(promise.getJSFunction("catch"), error);
+                // Separate then(success) and catch(error) leave the first child unhandled.
+                // QuickJS callVoid releases the child Promise returned by then.
+                then.callVoid(success, error);
             } finally {
-                if (json) promise.release();
+                try {
+                    then.release();
+                } finally {
+                    if (json) promise.release();
+                }
             }
-        }
-    }
-
-    private void consume(JSFunction func, JSCallFunction callback) {
-        if (func == null) return;
-        try {
-            func.callVoid(callback);
-        } finally {
-            func.release();
         }
     }
 

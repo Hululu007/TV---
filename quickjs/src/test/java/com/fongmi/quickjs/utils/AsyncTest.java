@@ -7,6 +7,8 @@ import com.whl.quickjs.wrapper.JSObject;
 import org.junit.Test;
 
 import java.lang.reflect.Proxy;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -58,6 +60,96 @@ public class AsyncTest {
         assertEquals("HTTP 403", error.getCause().getMessage());
     }
 
+    @Test
+    public void rejectionDoesNotLeaveAnUnhandledPromiseBranch() {
+        List<JSCallFunction> rejections = new ArrayList<>();
+        AtomicInteger unhandled = new AtomicInteger();
+        JSObject promise = fake(JSObject.class, (name, args) -> {
+            if (!name.equals("getJSFunction")) return null;
+            if (args[0].equals("then")) return function(values -> {
+                // A success-only then creates a child that also rejects, even if its parent has catch.
+                rejections.add(values.length > 1 ? (JSCallFunction) values[1] : ignored -> {
+                    unhandled.incrementAndGet();
+                    return null;
+                });
+                return null;
+            });
+            if (args[0].equals("catch")) return function(values -> {
+                rejections.add((JSCallFunction) values[0]);
+                return null;
+            });
+            return null;
+        });
+        CompletableFuture<Object> result = Async.runJson(spider(function(args -> promise)), "action");
+        for (JSCallFunction rejection : rejections) rejection.call("Dialog cancelled");
+        assertEquals("Dialog cancelled", assertThrows(ExecutionException.class, result::get).getCause().getMessage());
+        assertEquals("No rejected child may remain without an error handler", 0, unhandled.get());
+    }
+
+    @Test
+    public void readsAndReleasesRejectedErrorWithoutCallingItsToString() {
+        AtomicInteger releases = new AtomicInteger();
+        JSObject reason = fake(JSObject.class, (name, args) -> {
+            if (name.equals("getProperty")) { assertEquals("message", args[0]); return "Dialog cancelled"; }
+            if (name.equals("release")) releases.incrementAndGet();
+            if (name.equals("toString")) fail("Rejected JS values must not execute toString");
+            return null;
+        });
+        assertEquals("Dialog cancelled", reject(reason).getMessage());
+        assertEquals(1, releases.get());
+    }
+
+    @Test
+    public void throwingRejectionGetterStillCompletesFutureAndReleasesValue() {
+        AtomicInteger releases = new AtomicInteger();
+        IllegalStateException getterError = new IllegalStateException("Error.message getter failed");
+        JSObject reason = fake(JSObject.class, (name, args) -> {
+            if (name.equals("getProperty") || name.equals("toString")) throw getterError;
+            if (name.equals("release")) releases.incrementAndGet();
+            return null;
+        });
+        assertSame(getterError, reject(reason));
+        assertEquals(1, releases.get());
+    }
+
+    @Test
+    public void throwingRejectionReleaseIsPreservedWithoutEscapingCallback() {
+        IllegalStateException releaseError = new IllegalStateException("Error release failed");
+        JSObject reason = fake(JSObject.class, (name, args) -> {
+            if (name.equals("getProperty")) return "Dialog cancelled";
+            if (name.equals("release")) throw releaseError;
+            return null;
+        });
+        Throwable failure = reject(reason);
+        assertEquals("Dialog cancelled", failure.getMessage());
+        assertArrayEquals(new Throwable[]{releaseError}, failure.getSuppressed());
+    }
+
+    @Test
+    public void releasesObjectValuedErrorMessageWithoutRunningItsConverter() {
+        AtomicInteger releases = new AtomicInteger();
+        JSObject message = fake(JSObject.class, (name, args) -> {
+            if (name.equals("release")) releases.incrementAndGet();
+            if (name.equals("toString")) fail("Object-valued messages must not execute toString");
+            return null;
+        });
+        JSObject reason = fake(JSObject.class, (name, args) -> {
+            if (name.equals("getProperty")) return message;
+            if (name.equals("release")) releases.incrementAndGet();
+            return null;
+        });
+        assertEquals("JavaScript promise rejected", reject(reason).getMessage());
+        assertEquals(2, releases.get());
+    }
+
+    private Throwable reject(JSObject reason) {
+        AtomicReference<JSCallFunction> success = new AtomicReference<>();
+        AtomicReference<JSCallFunction> failure = new AtomicReference<>();
+        CompletableFuture<Object> result = Async.runJson(spider(function(args -> promise(success, failure))), "action");
+        failure.get().call(reason);
+        return assertThrows(ExecutionException.class, result::get).getCause();
+    }
+
     private JSObject spider(JSFunction function) {
         return fake(JSObject.class, (name, args) -> name.equals("getJSFunction") ? function : null);
     }
@@ -73,8 +165,13 @@ public class AsyncTest {
     private JSObject promise(AtomicReference<JSCallFunction> success, AtomicReference<JSCallFunction> failure) {
         return fake(JSObject.class, (name, args) -> {
             if (!name.equals("getJSFunction")) return null;
-            AtomicReference<JSCallFunction> target = args[0].equals("then") ? success : failure;
-            return function(values -> { target.set((JSCallFunction) values[0]); return null; });
+            if (args[0].equals("then")) return function(values -> {
+                success.set((JSCallFunction) values[0]);
+                if (values.length > 1) failure.set((JSCallFunction) values[1]);
+                return null;
+            });
+            if (args[0].equals("catch")) return function(values -> { failure.set((JSCallFunction) values[0]); return null; });
+            return null;
         });
     }
 
