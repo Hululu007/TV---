@@ -63,6 +63,11 @@ public class FolderFragment extends BaseFragment {
     protected void initView() {
         mType = getType();
         if (mPendingFilter == null) mPendingFilter = mType.getFilter();
+        if (getChild() != null) {
+            // Child fragments and their back stack survive the parent's view recreation.
+            applyPendingState();
+            return;
+        }
         getChildFragmentManager().beginTransaction().replace(R.id.container, TypeFragment.newInstance(getKey(), mType.getTypeId(), mType.getStyle(), getExtend(), mType.isFolder())).runOnCommit(this::applyPendingState).commit();
     }
 

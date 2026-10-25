@@ -86,7 +86,9 @@ public class FolderFragment extends BaseFragment {
         TypeFragment child = TypeFragment.newInstance(getKey(), mType.getTypeId(), mType.getStyle(), getExtend(), mType.isFolder(), getY());
         mPendingChild = child;
         mViewReady = true;
-        dispatchPendingCommands();
+        // This is a new root, so its first request can already use queued filter values.
+        // TypeFragment retains these commands until its own view is ready.
+        applyPendingCommands(child);
         getChildFragmentManager().beginTransaction().replace(R.id.container, child).runOnCommit(() -> onChildCommitted(child)).commit();
     }
 
@@ -117,23 +119,13 @@ public class FolderFragment extends BaseFragment {
     }
 
     public void onRefresh() {
-        if (!mViewReady) {
-            mPendingRefresh = true;
-            return;
-        }
-        TypeFragment child = getChild();
-        if (child == null) mPendingRefresh = true;
-        else child.onRefresh();
+        mPendingRefresh = true;
+        dispatchPendingCommands();
     }
 
     public void scrollToTop() {
-        if (!mViewReady) {
-            mPendingScrollToTop = true;
-            return;
-        }
-        TypeFragment child = getChild();
-        if (child == null) mPendingScrollToTop = true;
-        else child.scrollToTop();
+        mPendingScrollToTop = true;
+        dispatchPendingCommands();
     }
 
     public void setFilter(String key, Value value) {
@@ -160,6 +152,10 @@ public class FolderFragment extends BaseFragment {
         }
         TypeFragment child = getChild();
         if (child == null) return;
+        applyPendingCommands(child);
+    }
+
+    private void applyPendingCommands(TypeFragment child) {
         boolean hasFilters = !mPendingFilters.isEmpty();
         if (hasFilters) {
             Map<String, Value> filters = new LinkedHashMap<>(mPendingFilters);
