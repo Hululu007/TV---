@@ -384,4 +384,6 @@
     <string name="spider_dialog_max_choices">Select at most %1$d options</string>
     <string name="spider_dialog_max_length">Enter at most %1$d characters</string>
     <string name="spider_dialog_qrcode">Scan QR code</string>
+    <string name="timeshift_return_live">Return to live</string>
+    <string name="timeshift_resolve_failed">Unable to switch to this replay position. Please try again.</string>
 </resources>

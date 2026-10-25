@@ -56,6 +56,8 @@ public class Channel {
     private String tvgName;
     @SerializedName("catchup")
     private Catchup catchup;
+    @SerializedName("timeshift")
+    private Timeshift timeshift;
     @SerializedName("header")
     @JsonAdapter(HeaderAdapter.class)
     private Map<String, String> header;
@@ -369,6 +371,7 @@ public class Channel {
 
     public Channel copy(Channel item) {
         setCatchup(item.getCatchup());
+        timeshift = item.timeshift;
         setReferer(item.getReferer());
         setTvgName(item.getTvgName());
         setHeader(item.getHeader());
@@ -391,6 +394,7 @@ public class Channel {
 
     public Result result() {
         Result result = new Result();
+        result.setTimeshift(timeshift);
         result.setDrm(getDrm());
         result.setUrl(getCurrent());
         result.setClick(getClick());

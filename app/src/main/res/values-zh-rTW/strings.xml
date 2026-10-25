@@ -368,4 +368,6 @@
     <string name="spider_dialog_max_choices">請選擇最多 %1$d 個選項</string>
     <string name="spider_dialog_max_length">請輸入最多 %1$d 個字元</string>
     <string name="spider_dialog_qrcode">掃描 QR 碼</string>
+    <string name="timeshift_return_live">返回直播</string>
+    <string name="timeshift_resolve_failed">無法切換到此回看位置，請重試</string>
 </resources>

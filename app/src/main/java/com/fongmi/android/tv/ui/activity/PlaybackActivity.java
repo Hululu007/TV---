@@ -59,6 +59,7 @@ public abstract class PlaybackActivity extends BaseActivity implements MediaCont
     private MediaController mController;
     private PlaybackService mService;
     private TextView seekPreview;
+    private View returnLive;
     private boolean audioOnly;
     private boolean scrubbing;
     private boolean redirect;
@@ -233,6 +234,20 @@ public abstract class PlaybackActivity extends BaseActivity implements MediaCont
     protected void onPrepare() {
     }
 
+    protected void onTimeshiftChanged() {
+        if (returnLive != null) returnLive.setVisibility(isTimeshiftPlayback() ? View.VISIBLE : View.GONE);
+    }
+
+    public boolean isTimeshiftPlayback() {
+        return mService != null && isOwner() && player().getTimeshift().isActive();
+    }
+
+    protected void returnToLive() {
+        if (!isTimeshiftPlayback() || mController == null) return;
+        mController.seekToDefaultPosition();
+        mController.play();
+    }
+
     protected void onTracksChanged() {
     }
 
@@ -317,12 +332,15 @@ public abstract class PlaybackActivity extends BaseActivity implements MediaCont
             getSeekView().setPlayer(mController);
             mController.addListener(this);
             updateKeyIncrement();
+            onTimeshiftChanged();
         } catch (Exception ignored) {
         }
     }
 
     private void addSeekListener() {
         seekPreview = findViewById(R.id.seek_preview);
+        returnLive = findViewById(R.id.timeshift_live);
+        if (returnLive != null) returnLive.setOnClickListener(view -> returnToLive());
         getSeekView().getTimeBar().addListener(new TimeBar.OnScrubListener() {
             @Override
             public void onScrubStart(@NonNull TimeBar timeBar, long position) {
@@ -520,6 +538,12 @@ public abstract class PlaybackActivity extends BaseActivity implements MediaCont
     private final PlaybackService.PlayerCallback mPlayerCallback = new PlaybackService.PlayerCallback() {
 
         @Override
+        public void onTimeshiftChanged() {
+            if (isOwner()) PlaybackActivity.this.onTimeshiftChanged();
+        }
+
+
+        @Override
         public void onPrepare() {
             if (isOwner()) PlaybackActivity.this.onPrepare();
         }
@@ -601,6 +625,7 @@ public abstract class PlaybackActivity extends BaseActivity implements MediaCont
 
     @Override
     public void onPlaybackStateChanged(int state) {
+        if (state == Player.STATE_ENDED && isTimeshiftPlayback()) return;
         if (isOwner() && (state != Player.STATE_ENDED || mService == null || !mService.isMediaResolutionPending())) onStateChanged(state);
     }
 

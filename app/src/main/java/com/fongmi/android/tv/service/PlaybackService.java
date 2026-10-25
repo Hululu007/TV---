@@ -10,7 +10,6 @@ import android.os.IBinder;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.media3.common.C;
-import androidx.media3.common.ForwardingPlayer;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.Player;
 import androidx.media3.session.CommandButton;
@@ -34,6 +33,7 @@ import com.fongmi.android.tv.browse.BrowseTree;
 import com.fongmi.android.tv.event.ActionEvent;
 import com.fongmi.android.tv.event.ConfigEvent;
 import com.fongmi.android.tv.player.PlayerManager;
+import com.fongmi.android.tv.player.TimeshiftPlayback;
 import com.fongmi.android.tv.player.extractor.Source;
 import com.fongmi.android.tv.player.media.PlaySpec;
 import com.fongmi.android.tv.server.Server;
@@ -83,6 +83,7 @@ public class PlaybackService extends MediaLibraryService implements MediaLibrary
     private PlayerManager player;
     private String navigationKey;
     private Player sessionPlayer;
+    private PlaybackSessionPlayer exposedPlayer;
     private volatile boolean active;
 
     public static boolean isRunning() {
@@ -112,7 +113,14 @@ public class PlaybackService extends MediaLibraryService implements MediaLibrary
         player = new PlayerManager(this);
         sessionPlayer = player.getPlayer();
         sessionPlayer.addListener(listener);
-        session = new MediaLibrarySession.Builder(this, wrap(sessionPlayer), this).build();
+        exposedPlayer = new PlaybackSessionPlayer(sessionPlayer, new PlaybackSessionPlayer.Callback() {
+            @Override public TimeshiftPlayback timeshift() { return player.getTimeshift(); }
+            @Override public void setMediaItems(List<MediaItem> items, int startIndex, long startPositionMs) { interceptItems(items, startIndex, startPositionMs); }
+            @Override public void previous() { dispatchPrev(); }
+            @Override public void next() { dispatchNext(); }
+            @Override public void stop() { dispatchStop(); }
+        });
+        session = new MediaLibrarySession.Builder(this, exposedPlayer, this).build();
         session.setSessionActivity(buildDefaultIntent());
         EventBus.getDefault().register(this);
         Server.get().setService(this);
@@ -261,7 +269,7 @@ public class PlaybackService extends MediaLibraryService implements MediaLibrary
     }
 
     private void saveProgress() {
-        if (hasNavigationCallback() || session == null) return;
+        if (hasNavigationCallback() || session == null || player.getTimeshift().isActive()) return;
         if (BrowseTree.saveProgress(player.getPosition(), player.getDuration())) {
             session.notifyChildrenChanged("VOD", 0, null);
         }
@@ -318,6 +326,7 @@ public class PlaybackService extends MediaLibraryService implements MediaLibrary
     }
 
     public long beginLocalPlaybackRequest() {
+        player.getTimeshift().cancelPending();
         invalidateNavigation();
         invalidateMediaResolution();
         return localPlaybackGeneration.incrementAndGet();
@@ -351,6 +360,7 @@ public class PlaybackService extends MediaLibraryService implements MediaLibrary
     }
 
     private void invalidatePlaybackRequests() {
+        if (player != null) player.getTimeshift().cancelPending();
         invalidateNavigation();
         invalidateMediaResolution();
         localPlaybackGeneration.incrementAndGet();
@@ -500,71 +510,6 @@ public class PlaybackService extends MediaLibraryService implements MediaLibrary
         interceptItem(items.get(idx), startPositionMs);
     }
 
-    private ForwardingPlayer wrap(Player base) {
-        return new ForwardingPlayer(base) {
-            @Override
-            public void setMediaItem(@NonNull MediaItem item) {
-                interceptItem(item, C.TIME_UNSET);
-            }
-
-            @Override
-            public void setMediaItem(@NonNull MediaItem item, boolean resetPosition) {
-                interceptItem(item, C.TIME_UNSET);
-            }
-
-            @Override
-            public void setMediaItem(@NonNull MediaItem item, long startPositionMs) {
-                interceptItem(item, startPositionMs);
-            }
-
-            @Override
-            public void setMediaItems(@NonNull List<MediaItem> items) {
-                interceptItems(items, 0, C.TIME_UNSET);
-            }
-
-            @Override
-            public void setMediaItems(@NonNull List<MediaItem> items, boolean resetPosition) {
-                interceptItems(items, 0, C.TIME_UNSET);
-            }
-
-            @Override
-            public void setMediaItems(@NonNull List<MediaItem> items, int startIndex, long startPositionMs) {
-                interceptItems(items, startIndex, startPositionMs);
-            }
-
-            @Override
-            public void seekToPrevious() {
-                dispatchPrev();
-            }
-
-            @Override
-            public void seekToPreviousMediaItem() {
-                dispatchPrev();
-            }
-
-            @Override
-            public void seekToNext() {
-                dispatchNext();
-            }
-
-            @Override
-            public void seekToNextMediaItem() {
-                dispatchNext();
-            }
-
-            @Override
-            public void stop() {
-                dispatchStop();
-            }
-
-            @NonNull
-            @Override
-            public Commands getAvailableCommands() {
-                return super.getAvailableCommands().buildUpon().add(COMMAND_SEEK_TO_PREVIOUS).add(COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM).add(COMMAND_SEEK_TO_NEXT).add(COMMAND_SEEK_TO_NEXT_MEDIA_ITEM).add(COMMAND_SEEK_BACK).add(COMMAND_SEEK_FORWARD).add(COMMAND_STOP).add(COMMAND_SET_REPEAT_MODE).build();
-            }
-        };
-    }
-
     private void playViaManager(MediaItem item, long startPositionMs) {
         if (item == null || item.localConfiguration == null) return;
         Result result = BrowseTree.consumeBrowseResult(item.mediaId, getResolutionGeneration(item));
@@ -615,8 +560,14 @@ public class PlaybackService extends MediaLibraryService implements MediaLibrary
         sessionPlayer.removeListener(listener);
         sessionPlayer = newPlayer;
         sessionPlayer.addListener(listener);
-        if (session != null) session.setPlayer(wrap(newPlayer));
+        if (exposedPlayer != null) exposedPlayer.replacePlayer(newPlayer);
         playerCallbacks.forEach(callback -> callback.onPlayerRebuild(newPlayer));
+    }
+
+    @Override
+    public void onTimeshiftChanged() {
+        if (exposedPlayer != null) exposedPlayer.refreshTimeline();
+        playerCallbacks.forEach(PlayerCallback::onTimeshiftChanged);
     }
 
     @Override
@@ -642,7 +593,7 @@ public class PlaybackService extends MediaLibraryService implements MediaLibrary
     private final Player.Listener listener = new Player.Listener() {
         @Override
         public void onPlaybackStateChanged(int state) {
-            if (state == Player.STATE_ENDED && !mediaResolutionGate.isPending() && !(hasNavigationCallback() && isNavigationOwner())) navigateItem(1);
+            if (state == Player.STATE_ENDED && !player.getTimeshift().isActive() && !mediaResolutionGate.isPending() && !(hasNavigationCallback() && isNavigationOwner())) navigateItem(1);
         }
 
         @Override
@@ -813,6 +764,9 @@ public class PlaybackService extends MediaLibraryService implements MediaLibrary
     }
 
     public interface PlayerCallback {
+
+        default void onTimeshiftChanged() {
+        }
 
         default void onPrepare() {
         }

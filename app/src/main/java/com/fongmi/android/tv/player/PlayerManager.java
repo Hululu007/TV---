@@ -32,6 +32,7 @@ import com.fongmi.android.tv.player.engine.PlayerEngine;
 import com.fongmi.android.tv.player.engine.PlayerEngineFactory;
 import com.fongmi.android.tv.player.audio.AudioTrackRecovery;
 import com.fongmi.android.tv.player.media.MediaUrlGuard;
+import com.fongmi.android.tv.player.media.MediaItemFactory;
 import com.fongmi.android.tv.player.media.PlaySpec;
 import com.fongmi.android.tv.player.mpv.MpvPlayerEngine;
 import com.fongmi.android.tv.player.parse.ParseJob;
@@ -48,11 +49,12 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-public class PlayerManager implements ParseCallback {
+public class PlayerManager implements ParseCallback, TimeshiftPlayback.Host {
 
     private final Runnable runnable;
     private final Callback callback;
     private final CacheLease cacheLease;
+    private final TimeshiftPlayback timeshift;
     private PlayerEngine engine;
     private VideoSize videoSize;
     private ParseJob parseJob;
@@ -69,6 +71,7 @@ public class PlayerManager implements ParseCallback {
     private boolean softwareEngineFallback;
     private int audioRecoveryAttempts;
     private String audioRecoveryKey;
+    private boolean pendingTimeshiftRebuild;
 
     public PlayerManager(Callback callback) {
         this.callback = callback;
@@ -85,6 +88,7 @@ public class PlayerManager implements ParseCallback {
         this.pendingStartPositionMs = C.TIME_UNSET;
         this.danmakuConfig = DanmakuSetting.getConfig();
         this.danmakuEnabled = DanmakuSetting.isShow();
+        this.timeshift = new TimeshiftPlayback(this);
     }
 
     public static MediaMetadata buildMetadata(String title, String artist, String artUri) {
@@ -93,6 +97,8 @@ public class PlayerManager implements ParseCallback {
     }
 
     public void release() {
+        timeshift.clear();
+        stopParse();
         App.removeCallbacks(runnable);
         if (player != null) player.removeListener(listener);
         try {
@@ -109,12 +115,20 @@ public class PlayerManager implements ParseCallback {
         return player;
     }
 
+    public TimeshiftPlayback getTimeshift() {
+        return timeshift;
+    }
+
+    public boolean canSeek() {
+        return timeshift.isActive() || !isLive() && player.isCommandAvailable(Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM);
+    }
+
     public boolean canPreload() {
         return engine != null && engine.getType() == PlayerEngine.Type.EXO && !PlayerSetting.isMpv() && !softwareEngineFallback;
     }
 
     public boolean preload(Result result, long position, MediaMetadata metadata) {
-        if (!canPreload() || result.needParse() || result.isUseParse() || result.getDrm() != null) return false;
+        if (result.getTimeshift() != null || !canPreload() || result.needParse() || result.isUseParse() || result.getDrm() != null) return false;
         PlaySpec next = PlaySpec.from(result, getKey(), metadata).checkUa();
         return engine.preload(next, position);
     }
@@ -218,11 +232,11 @@ public class PlayerManager implements ParseCallback {
     }
 
     public boolean isLive() {
-        return engine.isLive();
+        return timeshift.isActive() || engine.isLive();
     }
 
     public boolean isVod() {
-        return engine.isVod();
+        return !timeshift.isActive() && engine.isVod();
     }
 
     public boolean haveTrack(int type) {
@@ -258,7 +272,7 @@ public class PlayerManager implements ParseCallback {
     }
 
     public long getPosition() {
-        return player.getCurrentPosition();
+        return timeshift.isActive() ? timeshift.getPosition() : player.getCurrentPosition();
     }
 
     public String getSizeText() {
@@ -294,7 +308,7 @@ public class PlayerManager implements ParseCallback {
     }
 
     public long getDuration() {
-        return player.getDuration();
+        return timeshift.isActive() ? timeshift.getDuration() : player.getDuration();
     }
 
     public String getDurationTime() {
@@ -377,12 +391,15 @@ public class PlayerManager implements ParseCallback {
     }
 
     public void stop() {
+        pendingTimeshiftRebuild = false;
+        timeshift.clear();
         App.removeCallbacks(runnable);
         engine.stop();
         stopParse();
     }
 
     public void clearMediaItems() {
+        timeshift.clear();
         player.clearMediaItems();
     }
 
@@ -395,13 +412,15 @@ public class PlayerManager implements ParseCallback {
     }
 
     public void replay(long positionMs) {
-        if (positionMs == C.TIME_UNSET) player.seekToDefaultPosition();
+        if (timeshift.isActive()) timeshift.seekTo(positionMs);
+        else if (positionMs == C.TIME_UNSET) player.seekToDefaultPosition();
         else player.seekTo(positionMs);
         player.play();
     }
 
     public void seekTo(long time) {
-        player.seekTo(time);
+        if (timeshift.isActive()) timeshift.seekTo(time);
+        else player.seekTo(time);
     }
 
     public long getTextOffsetMs() {
@@ -426,6 +445,8 @@ public class PlayerManager implements ParseCallback {
     }
 
     public void clear() {
+        pendingTimeshiftRebuild = false;
+        timeshift.clear();
         spec = null;
         forcePlatformEngine = false;
     }
@@ -448,14 +469,14 @@ public class PlayerManager implements ParseCallback {
         MpvLogCollector.log("PlayerManager", "切换解码模式: " + (decode == PlayerEngine.HARD ? "硬解" : "软解") + ", rebuild=" + rebuild);
         callback.onDecodeChanged();
         if (!rebuild) return;
-        long position = isLive() ? C.TIME_UNSET : getPosition();
+        long position = isLive() && !timeshift.isReplaying() ? C.TIME_UNSET : getPosition();
         restartCurrent(position, true);
     }
 
     /** Rebuilds the renderer/AudioSink so the AI PCM tap and lookahead buffer change immediately. */
     public void rebuildAudioPipeline() {
         if (engine == null || spec == null || player == null) return;
-        long position = player.isCurrentMediaItemLive() ? C.TIME_UNSET : getPosition();
+        long position = player.isCurrentMediaItemLive() && !timeshift.isReplaying() ? C.TIME_UNSET : getPosition();
         restartCurrent(position, true);
     }
 
@@ -607,6 +628,12 @@ public class PlayerManager implements ParseCallback {
     }
 
     private void restartCurrent(long positionMs, boolean rebuild) {
+        if (timeshift.isActive()) {
+            // Resolve first: a failed replay URL must not tear down the working stream.
+            pendingTimeshiftRebuild |= rebuild;
+            timeshift.seekTo(positionMs);
+            return;
+        }
         androidx.media3.common.PlaybackParameters parameters = player.getPlaybackParameters();
         boolean playing = player.getPlayWhenReady();
         if (rebuild) setPlayer(engine.rebuild());
@@ -655,7 +682,10 @@ public class PlayerManager implements ParseCallback {
         audioRecoveryAttempts = 0;
         audioRecoveryKey = null;
         this.spec = spec;
-        setMediaItem(timeout, startPositionMs);
+        pendingTimeshiftRebuild = false;
+        timeshift.start(spec);
+        setMediaItem(timeout, timeshift.isActive() ? C.TIME_UNSET : startPositionMs);
+        if (timeshift.isActive() && startPositionMs != C.TIME_UNSET) timeshift.seekTo(startPositionMs);
     }
 
     public void parse(String key, Result result, boolean useParse, MediaMetadata metadata) {
@@ -666,6 +696,8 @@ public class PlayerManager implements ParseCallback {
         stopParse();
         forcePlatformEngine = false;
         pendingStartPositionMs = startPositionMs;
+        pendingTimeshiftRebuild = false;
+        timeshift.clear();
         spec = PlaySpec.fromParse(result, key, metadata);
         parseJob = ParseJob.create(this).start(result, useParse);
     }
@@ -704,7 +736,51 @@ public class PlayerManager implements ParseCallback {
     }
 
     private void startCurrent(long startPositionMs) {
-        setMediaItem(Constant.TIMEOUT_PLAY, startPositionMs);
+        if (timeshift.isActive()) timeshift.seekTo(startPositionMs);
+        else setMediaItem(Constant.TIMEOUT_PLAY, startPositionMs);
+    }
+
+    @Override
+    public void applyTimeshift(String url, String format, Map<String, String> headers) {
+        if (spec == null || player == null) return;
+        boolean playing = player.getPlayWhenReady();
+        androidx.media3.common.PlaybackParameters parameters = player.getPlaybackParameters();
+        PlaySpec previous = spec;
+        long position = player.getCurrentPosition();
+        PlaySpec replacement = spec.withSource(url, format, new HashMap<>(headers)).checkUa();
+        // Validate the complete media item before replacing the current source.
+        MediaItemFactory.from(replacement);
+        reset();
+        clearPreload();
+        spec = replacement;
+        boolean rebuild = pendingTimeshiftRebuild;
+        pendingTimeshiftRebuild = false;
+        try {
+            if (rebuild) setPlayer(engine.rebuild());
+            setMediaItem(Constant.TIMEOUT_PLAY, C.TIME_UNSET);
+        } catch (RuntimeException failure) {
+            spec = previous;
+            try {
+                setMediaItem(Constant.TIMEOUT_PLAY, position);
+            } catch (RuntimeException recoveryFailure) {
+                failure.addSuppressed(recoveryFailure);
+            }
+            throw failure;
+        } finally {
+            restorePlaybackParameters(parameters);
+            player.setPlayWhenReady(playing);
+        }
+    }
+
+    @Override
+    public void onTimeshiftChanged() {
+        callback.onTimeshiftChanged();
+    }
+
+    @Override
+    public void onTimeshiftError() {
+        pendingTimeshiftRebuild = false;
+        Notify.show(R.string.timeshift_resolve_failed);
     }
 
     private Danmaku getSelectedDanmaku(List<Danmaku> items) {
@@ -717,7 +793,12 @@ public class PlayerManager implements ParseCallback {
     }
 
     public Uri getSelectedDanmakuUri() {
-        return getSelectedDanmaku().getUri();
+        Uri uri = getSelectedDanmaku().getUri();
+        // Timed file-based comments keep their normal playback clock. Live subscriptions must
+        // not show the current broadcast's comments while an earlier point is replayed.
+        String scheme = uri == null ? "" : uri.getScheme();
+        boolean realtime = "spider".equalsIgnoreCase(scheme) || "ws".equalsIgnoreCase(scheme) || "wss".equalsIgnoreCase(scheme);
+        return timeshift.isReplaying() && realtime ? null : uri;
     }
 
     public void setDanmaku(Danmaku item) {
@@ -737,7 +818,9 @@ public class PlayerManager implements ParseCallback {
         // Keep the parser-owned map untouched because some parsers return immutable maps.
         if (spec != null) spec.setHeaders(headers);
         if (spec != null) spec.setUrl(url);
-        startCurrent(pendingStartPositionMs);
+        if (spec != null) timeshift.start(spec);
+        setMediaItem(Constant.TIMEOUT_PLAY, timeshift.isActive() ? C.TIME_UNSET : pendingStartPositionMs);
+        if (timeshift.isActive() && pendingStartPositionMs != C.TIME_UNSET) timeshift.seekTo(pendingStartPositionMs);
         pendingStartPositionMs = C.TIME_UNSET;
     }
 
@@ -749,6 +832,9 @@ public class PlayerManager implements ParseCallback {
     }
 
     public interface Callback {
+
+        default void onTimeshiftChanged() {
+        }
 
         void onPrepare();
 
@@ -777,6 +863,11 @@ public class PlayerManager implements ParseCallback {
         public void onPlaybackStateChanged(int state) {
             DiagnosticLog.record("playback", "state=" + state + " engine=" + (engine == null ? "none" : engine.getType()));
             if (state == Player.STATE_READY || state == Player.STATE_ENDED) App.removeCallbacks(runnable);
+            if (state == Player.STATE_READY) timeshift.onReady();
+            if (state == Player.STATE_ENDED && timeshift.isActive()) {
+                timeshift.seekTo(C.TIME_UNSET);
+                player.play();
+            }
         }
 
         @Override

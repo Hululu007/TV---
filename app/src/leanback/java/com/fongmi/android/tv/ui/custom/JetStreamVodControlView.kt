@@ -157,6 +157,7 @@ class JetStreamVodControlView @JvmOverloads constructor(
     private var tertiaryText by mutableStateOf("")
     private var playing by mutableStateOf(false)
     private var livePlayback by mutableStateOf(false)
+    private var timeshiftEnabled by mutableStateOf(false)
     private var repeating by mutableStateOf(false)
     private var previousVisible by mutableStateOf(true)
     private var nextVisible by mutableStateOf(true)
@@ -215,6 +216,10 @@ class JetStreamVodControlView @JvmOverloads constructor(
 
     fun setLiveMode(live: Boolean) {
         livePlayback = live
+    }
+
+    fun setTimeshiftEnabled(enabled: Boolean) {
+        timeshiftEnabled = enabled
     }
 
     fun setPlaybackState(isPlaying: Boolean, isRepeating: Boolean) {
@@ -646,6 +651,17 @@ class JetStreamVodControlView @JvmOverloads constructor(
                         modifier = Modifier.weight(1f)
                     )
                     ControllerText(formatTime(durationMs))
+                }
+                if (timeshiftEnabled) {
+                    Spacer(Modifier.width(10.dp))
+                    ControlIcon(
+                        icon = R.drawable.msr_live_tv,
+                        isPlaying = isPlaying,
+                        enabled = true,
+                        selected = durationMs > 0 && durationMs - positionMs <= 2000,
+                        showLabel = true,
+                        contentDescription = stringResource(R.string.timeshift_return_live)
+                    ) { listener?.onCommand("timeshift_live") }
                 }
             }
             // Hidden seek guidance must not reserve an empty row between controls.

@@ -294,7 +294,7 @@ public class LiveActivity extends PlaybackActivity implements GroupAdapter.OnCli
 
             @Override
             public void onSeekTo(long positionMs) {
-                if (controller() != null && !player().isLive()) controller().seekTo(positionMs);
+                if (controller() != null && player().canSeek()) controller().seekTo(positionMs);
             }
 
             @Override
@@ -1137,6 +1137,7 @@ public class LiveActivity extends PlaybackActivity implements GroupAdapter.OnCli
 
     private void onJetStreamCommand(String key) {
         switch (key) {
+            case "timeshift_live" -> returnToLive();
             case "home" -> onHome();
             case "line" -> onLine();
             case "config" -> onConfig();
@@ -1155,12 +1156,19 @@ public class LiveActivity extends PlaybackActivity implements GroupAdapter.OnCli
         syncJetStreamControl();
     }
 
+    @Override
+    protected void onTimeshiftChanged() {
+        super.onTimeshiftChanged();
+        if (mBinding != null) mBinding.control.jetstream.setTimeshiftEnabled(isTimeshiftPlayback());
+    }
+
     private void syncJetStreamControl() {
         if (mBinding == null) return;
         mBinding.control.jetstream.setLiveMode(true);
         boolean owner = service() != null && isOwner();
         boolean playing = owner && player().isPlaying();
         mBinding.control.jetstream.setPlayer(controller());
+        mBinding.control.jetstream.setTimeshiftEnabled(isTimeshiftPlayback());
         mBinding.control.jetstream.setMediaTitle(getJetStreamTitle(), getJetStreamSecondaryText(), getJetStreamTertiaryText());
         mBinding.control.jetstream.setPlaybackState(playing, false);
         mBinding.control.jetstream.setTransportActions(true, true, false);
@@ -1282,7 +1290,7 @@ public class LiveActivity extends PlaybackActivity implements GroupAdapter.OnCli
 
     @Override
     public void onSeeking(long time) {
-        if (player().isLive()) return;
+        if (!player().canSeek()) return;
         showJetStreamInfo(false, true, time > 0 ? JetStreamVodControlView.ACTION_FORWARD : JetStreamVodControlView.ACTION_REWIND, player().getPositionTime(time), player().getDurationTime());
         setR3Callback();
         hideProgress();
@@ -1302,13 +1310,13 @@ public class LiveActivity extends PlaybackActivity implements GroupAdapter.OnCli
 
     @Override
     public void onKeyLeft(long time) {
-        if (player().isLive()) prevLine();
+        if (!player().canSeek()) prevLine();
         else postSeek(time);
     }
 
     @Override
     public void onKeyRight(long time) {
-        if (player().isLive()) nextLine(true);
+        if (!player().canSeek()) nextLine(true);
         else postSeek(time);
     }
 
