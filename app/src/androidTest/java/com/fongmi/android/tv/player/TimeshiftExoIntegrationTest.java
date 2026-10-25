@@ -29,6 +29,7 @@ import org.junit.runner.RunWith;
 import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.lang.reflect.Method;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
@@ -63,6 +64,11 @@ public class TimeshiftExoIntegrationTest {
     private final AtomicReference<String> error = new AtomicReference<>();
     private PlayerManager manager;
     private MediaServer server;
+    private final AtomicInteger injectedDecodeErrors = new AtomicInteger();
+    private final AtomicInteger fatalDecodeErrors = new AtomicInteger();
+    private final AtomicInteger rebuilds = new AtomicInteger();
+    private boolean injectDecodeOnPrepare;
+    private boolean allowRebuild;
 
     @Test public void shouldApplyReplayAndLiveSourcesToRealExoAndKeepPausedPlaybackOnResolverFailure() throws Exception {
         Map<String, ?> saved = new HashMap<>(Prefers.getPrefers().getAll());
@@ -145,20 +151,82 @@ public class TimeshiftExoIntegrationTest {
                 main(() -> { if (manager != null) manager.release(); });
             } finally {
                 if (server != null) server.stop();
-                main(() -> {
-                    for (String key : SETTINGS.keySet()) {
-                        if (saved.containsKey(key)) Prefers.put(key, saved.get(key));
-                        else Prefers.remove(key);
-                    }
-                });
-                Map<String, ?> current = Prefers.getPrefers().getAll();
-                for (String key : SETTINGS.keySet()) {
-                    assertEquals("Restore presence of " + key, saved.containsKey(key), current.containsKey(key));
-                    assertEquals("Restore " + key, saved.get(key), current.get(key));
-                }
+                restorePreferences(saved);
                 restored = true;
-                writeReport(passed, restored, stage);
+                writeReport("timeshift-exo.json", passed, restored, stage);
             }
+        }
+    }
+
+    @Test public void shouldKeepTheDecodeRetryBudgetAcrossSuccessfulTimeshiftResolution() throws Exception {
+        Map<String, ?> saved = new HashMap<>(Prefers.getPrefers().getAll());
+        boolean passed = false;
+        try {
+            main(() -> SETTINGS.forEach(Prefers::put));
+            server = new MediaServer();
+            server.start(NanoHTTPD.SOCKET_READ_TIMEOUT, true);
+            main(() -> {
+                allowRebuild = true;
+                manager = new PlayerManager(new Callback());
+                Result result = new Result();
+                result.setUrl(server.base() + "/initial.wav");
+                result.setFormat("audio/wav");
+                result.setHeader(Map.of("X-Timeshift-Fixture", "initial"));
+                result.setTimeshift(new Timeshift(server.base() + "/resolve?time={time}", System.currentTimeMillis() - 120_000, 60_000));
+                manager.start(PlaySpec.from(result, "timeshift-decode-budget-fixture", MediaMetadata.EMPTY), 20_000);
+                manager.pause();
+                manager.getPlayer().setVolume(0);
+            });
+            awaitReady("/initial.wav");
+            main(() -> {
+                // The next error is injected at the actual replacement's onPrepare callback,
+                // after HTTP resolution and applyTimeshift, before that decoder can reach READY.
+                injectDecodeOnPrepare = true;
+                injectDecodeFailure();
+            });
+            long deadline = SystemClock.elapsedRealtime() + 10_000;
+            while (injectedDecodeErrors.get() < 2 && SystemClock.elapsedRealtime() < deadline) SystemClock.sleep(50);
+            main(() -> {
+                assertEquals(2, injectedDecodeErrors.get());
+                assertEquals("Second decode error must exhaust the same stream's budget", 1, fatalDecodeErrors.get());
+                assertEquals("Only the first error may rebuild the decoder", 1, rebuilds.get());
+            });
+            assertEquals("A failed replacement must not resolve endlessly", 1, server.times.size());
+            assertNull(error.get());
+            passed = true;
+        } finally {
+            try {
+                main(() -> { if (manager != null) manager.release(); });
+            } finally {
+                if (server != null) server.stop();
+                restorePreferences(saved);
+                writeReport("timeshift-exo-decode-retry.json", passed, true, "decode-retry-budget");
+            }
+        }
+    }
+
+    private void injectDecodeFailure() {
+        try {
+            Method method = PlayerManager.class.getDeclaredMethod("handleDecodeError", PlaybackException.class);
+            method.setAccessible(true);
+            injectedDecodeErrors.incrementAndGet();
+            method.invoke(manager, new PlaybackException("Injected decoder failure", null, PlaybackException.ERROR_CODE_DECODING_FAILED));
+        } catch (ReflectiveOperationException failure) {
+            throw new AssertionError("Could not drive the production decode failure path", failure);
+        }
+    }
+
+    private void restorePreferences(Map<String, ?> saved) {
+        main(() -> {
+            for (String key : SETTINGS.keySet()) {
+                if (saved.containsKey(key)) Prefers.put(key, saved.get(key));
+                else Prefers.remove(key);
+            }
+        });
+        Map<String, ?> current = Prefers.getPrefers().getAll();
+        for (String key : SETTINGS.keySet()) {
+            assertEquals("Restore presence of " + key, saved.containsKey(key), current.containsKey(key));
+            assertEquals("Restore " + key, saved.get(key), current.get(key));
         }
     }
 
@@ -205,7 +273,7 @@ public class TimeshiftExoIntegrationTest {
         return value.get();
     }
 
-    private void writeReport(boolean passed, boolean restored, String stage) throws Exception {
+    private void writeReport(String filename, boolean passed, boolean restored, String stage) throws Exception {
         Context context = instrumentation.getTargetContext();
         File directory = new File(context.getExternalFilesDir(null), "upstream-verification");
         assertTrue(directory.isDirectory() || directory.mkdirs());
@@ -213,20 +281,32 @@ public class TimeshiftExoIntegrationTest {
                 .put("passed", passed && restored).put("preferencesRestored", restored).put("lastStage", stage)
                 .put("videoDecoded", false).put("mpvExecuted", false)
                 .put("mediaRequests", server == null ? 0 : server.mediaRequests.size())
-                .put("resolverRequests", server == null ? 0 : server.times.size());
+                .put("resolverRequests", server == null ? 0 : server.times.size())
+                .put("injectedDecodeErrors", injectedDecodeErrors.get()).put("fatalDecodeErrors", fatalDecodeErrors.get()).put("decoderRebuilds", rebuilds.get());
         if (error.get() != null) report.put("playbackError", error.get());
-        try (FileOutputStream output = new FileOutputStream(new File(directory, "timeshift-exo.json"))) {
+        try (FileOutputStream output = new FileOutputStream(new File(directory, filename))) {
             output.write(report.toString(2).getBytes(StandardCharsets.UTF_8));
         }
     }
 
     private final class Callback implements PlayerManager.Callback {
-        @Override public void onPrepare() {}
+        @Override public void onPrepare() {
+            if (injectDecodeOnPrepare) {
+                injectDecodeOnPrepare = false;
+                injectDecodeFailure();
+            }
+        }
         @Override public void onTracksChanged() {}
         @Override public void onDecodeChanged() {}
         @Override public void onMediaOptionsChanged() {}
-        @Override public void onError(String message) { error.set(message); }
-        @Override public void onPlayerRebuild(Player player) { error.set("Unexpected engine replacement"); }
+        @Override public void onError(String message) {
+            if (injectedDecodeErrors.get() == 2) fatalDecodeErrors.incrementAndGet();
+            else error.set(message);
+        }
+        @Override public void onPlayerRebuild(Player player) {
+            rebuilds.incrementAndGet();
+            if (!allowRebuild) error.set("Unexpected engine replacement");
+        }
         @Override public void onDanmakuSourceChanged(Uri uri) {}
         @Override public void onDanmakuConfigChanged(DanmakuConfig config) {}
         @Override public void onDanmakuEnabledChanged(boolean enabled) {}

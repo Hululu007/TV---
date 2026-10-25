@@ -681,6 +681,7 @@ public class PlayerManager implements ParseCallback, TimeshiftPlayback.Host {
         softwareEngineFallback = false;
         audioRecoveryAttempts = 0;
         audioRecoveryKey = null;
+        retry = 0;
         this.spec = spec;
         pendingTimeshiftRebuild = false;
         timeshift.start(spec);
@@ -696,6 +697,7 @@ public class PlayerManager implements ParseCallback, TimeshiftPlayback.Host {
         stopParse();
         forcePlatformEngine = false;
         pendingStartPositionMs = startPositionMs;
+        retry = 0;
         pendingTimeshiftRebuild = false;
         timeshift.clear();
         spec = PlaySpec.fromParse(result, key, metadata);
@@ -750,7 +752,9 @@ public class PlayerManager implements ParseCallback, TimeshiftPlayback.Host {
         PlaySpec replacement = spec.withSource(url, format, new HashMap<>(headers)).checkUa();
         // Validate the complete media item before replacing the current source.
         MediaItemFactory.from(replacement);
-        reset();
+        // Resolving another position is still the same logical stream. In particular a
+        // decoder fallback must keep its retry budget until playback reaches READY.
+        App.removeCallbacks(runnable);
         clearPreload();
         spec = replacement;
         boolean rebuild = pendingTimeshiftRebuild;
@@ -863,7 +867,10 @@ public class PlayerManager implements ParseCallback, TimeshiftPlayback.Host {
         public void onPlaybackStateChanged(int state) {
             DiagnosticLog.record("playback", "state=" + state + " engine=" + (engine == null ? "none" : engine.getType()));
             if (state == Player.STATE_READY || state == Player.STATE_ENDED) App.removeCallbacks(runnable);
-            if (state == Player.STATE_READY) timeshift.onReady();
+            if (state == Player.STATE_READY) {
+                if (timeshift.isActive()) retry = 0;
+                timeshift.onReady();
+            }
             if (state == Player.STATE_ENDED && timeshift.isActive()) {
                 timeshift.seekTo(C.TIME_UNSET);
                 player.play();

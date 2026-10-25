@@ -136,7 +136,7 @@ public final class TimeshiftPlayback {
         if (awaitingReady) return replaying ? window.position(epochOffset, now) : getDuration();
         Player player = owner.getPlayer();
         Timeline timeline = player.getCurrentTimeline();
-        if (replaying && !timeline.isEmpty()) {
+        if (!timeline.isEmpty()) {
             timeline.getWindow(player.getCurrentMediaItemIndex(), sourceWindow);
             if (sourceWindow.windowStartTimeMs != C.TIME_UNSET) {
                 return window.position(sourceWindow.windowStartTimeMs + position, now);
@@ -222,6 +222,9 @@ public final class TimeshiftPlayback {
             fail(future);
             return;
         }
+        // Starting a source can synchronously issue another playback command through its
+        // callbacks. Do not clear that newer seek or complete the superseded operation.
+        if (pending != future) return;
         pending = null;
         try {
             owner.onTimeshiftChanged();

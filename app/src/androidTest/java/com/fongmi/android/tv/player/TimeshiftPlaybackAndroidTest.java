@@ -111,6 +111,31 @@ public class TimeshiftPlaybackAndroidTest {
         });
     }
 
+    @Test public void shouldFollowProgramDateTimeForMovingLiveAndPausedHlsWindows() {
+        main(() -> {
+            host.player.position = 55_000;
+            host.player.windowStartTimeMs = NOW - 60_000;
+            host.player.refresh();
+            host.timeshift.start(spec(NOW - 120_000, 60_000));
+            host.timeshift.onReady();
+            assertFalse(host.timeshift.isReplaying());
+            assertEquals(55_000, host.timeshift.getPosition());
+            // The HLS window and clock move together while the live-edge offset stays 5 s.
+            clock.now += 10_000;
+            host.player.windowStartTimeMs += 10_000;
+            host.player.refresh();
+            host.timeshift.updateWindow();
+            assertEquals(55_000, host.timeshift.getPosition());
+            // While paused, the raw HLS position decreases as its sliding window advances.
+            clock.now += 10_000;
+            host.player.windowStartTimeMs += 10_000;
+            host.player.position -= 10_000;
+            host.player.refresh();
+            host.timeshift.updateWindow();
+            assertEquals(45_000, host.timeshift.getPosition());
+        });
+    }
+
     @Test public void shouldNotAnchorNewLivePlaybackToThePreviousMoviesPosition() {
         main(() -> {
             host.player.position = 3_600_000;
@@ -191,6 +216,22 @@ public class TimeshiftPlaybackAndroidTest {
         });
     }
 
+    @Test public void shouldRetainANewerSeekIssuedSynchronouslyWhileApplyingAResult() throws Exception {
+        AtomicReference<ListenableFuture<?>> newer = new AtomicReference<>();
+        main(() -> host.afterApply = () -> newer.set(host.timeshift.seekTo(30_000)));
+        ListenableFuture<?> older = seek(10_000);
+        long deadline = SystemClock.elapsedRealtime() + 5000;
+        while (newer.get() == null && SystemClock.elapsedRealtime() < deadline) SystemClock.sleep(20);
+        assertNotNull(newer.get());
+        newer.get().get(5, TimeUnit.SECONDS);
+        assertTrue(older.isCancelled());
+        main(() -> {
+            assertEquals(2, host.applications);
+            assertEquals(30_000, host.timeshift.getPosition());
+            assertEquals(0, host.errors);
+        });
+    }
+
     @Test public void shouldCompleteAndRestoreTimelineWhenApplyingAResultThrows() throws Exception {
         main(() -> host.rejectApplication = true);
         seek(20_000).get(5, TimeUnit.SECONDS);
@@ -255,6 +296,7 @@ public class TimeshiftPlaybackAndroidTest {
         int errors;
         boolean rejectApplication;
         boolean rejectErrorPresentation;
+        Runnable afterApply;
 
         @Override public Player getPlayer() { return player; }
         @Override public TimeshiftPlayback timeshift() { return timeshift; }
@@ -269,6 +311,11 @@ public class TimeshiftPlaybackAndroidTest {
             this.headers = headers;
             applications++;
             player.position = 0;
+            if (afterApply != null) {
+                Runnable callback = afterApply;
+                afterApply = null;
+                callback.run();
+            }
             timeshift.onReady();
         }
 
@@ -284,8 +331,10 @@ public class TimeshiftPlaybackAndroidTest {
 
     private static final class FixturePlayer extends SimpleBasePlayer {
         long position;
+        long windowStartTimeMs = C.TIME_UNSET;
 
         FixturePlayer() { super(Looper.getMainLooper()); }
+        void refresh() { invalidateState(); }
 
         @Override protected State getState() {
             return new State.Builder().setAvailableCommands(new Player.Commands.Builder().addAll(
@@ -293,7 +342,7 @@ public class TimeshiftPlaybackAndroidTest {
                             Player.COMMAND_PLAY_PAUSE, Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM).build())
                     .setPlaylist(List.of(new MediaItemData.Builder("fixture-live")
                             .setMediaItem(new MediaItem.Builder().setUri("https://example.com/live.m3u8").build())
-                            .setDurationUs(C.TIME_UNSET).setIsDynamic(true).build()))
+                            .setDurationUs(C.TIME_UNSET).setIsDynamic(true).setWindowStartTimeMs(windowStartTimeMs).build()))
                     .setCurrentMediaItemIndex(0).setPlaybackState(Player.STATE_READY)
                     .setContentPositionMs(() -> position).build();
         }

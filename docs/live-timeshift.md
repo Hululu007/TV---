@@ -39,11 +39,11 @@
 
 客户端请求解析时继续播放当前流。只有有效响应才替换媒体地址，保留当前暂停状态和播放参数；解析失败时提示错误并保留当前流。后续拖动、切换频道、新的播放请求、取消或播放器释放都会作废此前未完成的解析，晚到的结果不会覆盖当前播放。
 
-暂停时播放时间点保持不动，而窗口继续移动。窗口外的旧位置在控件中限制为最早可回看位置。此功能不在本机录制频道；源必须真的提供所声明时间段的内容。
+HLS 时间轴提供 Program-Date-Time 时，直播和回看都使用该时间基准；播放列表窗口向前滑动不会让直播进度错误地向后漂移。暂停时播放时间点保持不动，而窗口继续移动。窗口外的旧位置在控件中限制为最早可回看位置。此功能不在本机录制频道；源必须真的提供所声明时间段的内容。
 
 ## 播放器与界面
 
-Exo 和 MPV 使用相同的解析与时间窗口逻辑，不修改原生播放器接口。MediaSession 暴露统一的移动时间轴，普通点播的上一集、下一集、停止和媒体请求仍交由原有业务控制器处理。
+Exo 和 MPV 使用相同的解析与时间窗口逻辑，不修改原生播放器接口。时移解析成功不会重置同一媒体的解码回退预算；新的媒体或实际达到 READY 后才恢复预算，避免坏流反复切换软硬解码。MediaSession 暴露统一的移动时间轴，普通点播的上一集、下一集、停止和媒体请求仍交由原有业务控制器处理。
 
 TV 的进度条支持遥控器确认、左右调整及触屏拖动，旁边提供“返回直播”；手机版使用现有 PlayerSeekView 和同名按钮。时移流不会写入普通点播进度、触发片尾跳过或预加载下一集。源提供的 EPG 回看结果会移除时移字段，避免两种回看路径混用。
 
@@ -61,8 +61,8 @@ TV 的进度条支持遥控器确认、左右调整及触屏拖动，旁边提�
 
 Android 测试类：
 
-- `com.fongmi.android.tv.player.TimeshiftPlaybackAndroidTest`：真实 loopback HTTP、解析失败/取消/过期响应、播放时间锚定、暂停窗口、返回直播、移动窗口边界；使用 Media3 的测试 Player，不依赖解码器 ABI。
-- `com.fongmi.android.tv.player.TimeshiftExoIntegrationTest`：生产 PlayerManager 和 Exo、loopback HTTP 与纯 Java 生成的 12 秒 PCM WAV；验证真实媒体准备、音轨选择、replay/live URL 和请求头、暂停/速度保持以及解析失败保留当前媒体。报告写入 `externalFiles/upstream-verification/timeshift-exo.json`；测试恢复所改偏好，不依赖外部素材或 MPV/FFmpeg 原生解码。
+- `com.fongmi.android.tv.player.TimeshiftPlaybackAndroidTest`：真实 loopback HTTP、解析失败/取消/过期响应、播放时间锚定、PDT 移动窗口、暂停、返回直播、同步回调中的重入 seek 和移动窗口边界；使用 Media3 的测试 Player，不依赖解码器 ABI。
+- `com.fongmi.android.tv.player.TimeshiftExoIntegrationTest`：生产 PlayerManager 和 Exo、loopback HTTP 与纯 Java 生成的 12 秒 PCM WAV；验证真实媒体准备、音轨选择、replay/live URL 和请求头、暂停/速度保持以及解析失败保留当前媒体。另驱动连续两次解码错误的生产恢复路径，验证一次回退后停止重试。报告写入 `externalFiles/upstream-verification/timeshift-exo*.json`；测试恢复所改偏好，不依赖外部素材或 MPV/FFmpeg 原生解码。
 - `com.fongmi.android.tv.service.PlaybackSessionPlayerAndroidTest`：生产 MediaSession 包装器的普通单项点播/直播业务上一项、下一项、停止、媒体替换和普通 seek 回归。
 - Preview 变体的 `com.fongmi.android.tv.test.TimeshiftControlsTest`：生产 TV Compose 控件的触屏→遥控器切换、返回直播和不支持频道隐藏入口；截图写入 `externalFiles/upstream-verification/timeshift-*.png`。
 
