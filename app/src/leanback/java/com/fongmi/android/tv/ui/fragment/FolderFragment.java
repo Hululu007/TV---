@@ -27,6 +27,7 @@ public class FolderFragment extends BaseFragment {
     private Boolean mPendingFilter;
     private boolean mPendingRefresh;
     private Class mType;
+    private final Runnable mApplyRootFilter = this::applyRootFilter;
 
     public static FolderFragment newInstance(String key, Class type) {
         Bundle args = new Bundle();
@@ -85,16 +86,19 @@ public class FolderFragment extends BaseFragment {
     }
 
     public void toggleFilter(boolean visible) {
-        TypeFragment child = getChild();
-        if (child == null) {
-            mPendingFilter = visible;
-            return;
-        }
-        mPendingFilter = null;
-        child.toggleFilter(visible);
+        mPendingFilter = visible;
+        applyPendingState();
     }
 
     private void applyPendingState() {
+        if (!canApplyPendingState()) return;
+        if (needsRootFilter()) {
+            // A runOnCommit/lifecycle callback may still be executing a fragment transaction.
+            // Pop on the next main-loop turn, before sending root filters to any child.
+            mBinding.getRoot().removeCallbacks(mApplyRootFilter);
+            mBinding.getRoot().post(mApplyRootFilter);
+            return;
+        }
         TypeFragment child = getChild();
         if (child == null) return;
         if (mPendingFilter != null) {
@@ -108,14 +112,36 @@ public class FolderFragment extends BaseFragment {
         }
     }
 
+    private boolean canApplyPendingState() {
+        return mBinding != null && mType != null && isAdded() && !getChildFragmentManager().isStateSaved();
+    }
+
+    private boolean needsRootFilter() {
+        return Boolean.TRUE.equals(mPendingFilter) && !Cache.get(mType).isEmpty() && canBack();
+    }
+
+    private void applyRootFilter() {
+        if (!canApplyPendingState()) return;
+        if (needsRootFilter()) getChildFragmentManager().popBackStackImmediate(null, FragmentManager.POP_BACK_STACK_INCLUSIVE);
+        applyPendingState();
+    }
+
     public void onRefresh() {
-        TypeFragment child = getChild();
-        if (child == null) {
-            mPendingRefresh = true;
-            return;
-        }
-        mPendingRefresh = false;
-        child.onRefresh();
+        mPendingRefresh = true;
+        applyPendingState();
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        if (mBinding != null) mBinding.getRoot().post(mApplyRootFilter);
+    }
+
+    @Override
+    public void onDestroyView() {
+        if (mBinding != null) mBinding.getRoot().removeCallbacks(mApplyRootFilter);
+        mBinding = null;
+        super.onDestroyView();
     }
 
     public boolean canBack() {
