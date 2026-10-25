@@ -275,6 +275,8 @@ public final class SpiderDialog implements LifecycleEventObserver {
             MaterialAutoCompleteTextView input = new MaterialAutoCompleteTextView(layout.getContext());
             input.setInputType(InputType.TYPE_NULL);
             input.setKeyListener(null);
+            input.setCursorVisible(false);
+            input.setPaddingRelative(ResUtil.dp2px(16), input.getPaddingTop(), ResUtil.dp2px(16), input.getPaddingBottom());
             return input;
         }
         TextInputEditText input = new TextInputEditText(layout.getContext());
