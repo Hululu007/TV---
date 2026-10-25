@@ -31,13 +31,22 @@ def main():
     if not metadata["applicationId"].endswith(".preview") or len(metadata["elements"]) != 1:
         raise SystemExit("Only an isolated, single-output preview APK may be modified")
     apk = metadata_file.parent / metadata["elements"][0]["outputFile"]
+    test_metadata_file = Path("app/build/outputs/apk/androidTest/leanbackArm64_v8a/preview/output-metadata.json")
+    test_metadata = json.loads(test_metadata_file.read_text())
+    if len(test_metadata["elements"]) != 1 or test_metadata["applicationId"] != metadata["applicationId"] + ".test":
+        raise SystemExit("Expected the isolated preview instrumentation APK")
+    test_apk = test_metadata_file.parent / test_metadata["elements"][0]["outputFile"]
     build_tools = Path(os.environ["ANDROID_HOME"]) / "build-tools/37.0.0"
-    keystore = Path.home() / ".android/debug.keystore"
-    if not keystore.is_file():
-        raise SystemExit("The preview must use the Android debug signing key")
 
     with tempfile.TemporaryDirectory(prefix="tv-quickjs-preview-") as temporary:
         directory = Path(temporary)
+        # Cached signed Gradle outputs do not necessarily recreate ~/.android/debug.keystore.
+        # Sign both disposable APKs with one new key so their instrumentation signatures match.
+        keystore = directory / "preview.jks"
+        run("keytool", "-genkeypair", "-noprompt", "-storetype", "JKS",
+            "-keystore", keystore, "-storepass", "android", "-keypass", "android",
+            "-alias", "androiddebugkey", "-keyalg", "RSA", "-keysize", "2048",
+            "-validity", "2", "-dname", "CN=TV CI Preview,O=Android,C=US")
         wrapper = directory / "quickjs.aar"
         url = ("https://repo.maven.apache.org/maven2/wang/harlon/quickjs/wrapper-android/"
                f"{WRAPPER_VERSION}/wrapper-android-{WRAPPER_VERSION}.aar")
@@ -51,27 +60,33 @@ def main():
         if hashlib.sha256(library).hexdigest() != LIBRARY_SHA256:
             raise SystemExit("QuickJS x86_64 library checksum mismatch")
 
-        unsigned = directory / "preview-unsigned.apk"
         library_entry = "lib/x86_64/" + LIBRARY
-        with zipfile.ZipFile(apk) as source, zipfile.ZipFile(unsigned, "w") as output:
-            for item in source.infolist():
-                if item.filename == library_entry:
-                    continue
-                if re.match(r"META-INF/[^/]+\.(SF|RSA|DSA|EC)$", item.filename, re.I):
-                    continue
-                if item.filename.upper() == "META-INF/MANIFEST.MF":
-                    continue
-                output.writestr(item, source.read(item.filename))
-            output.writestr(library_entry, library, compress_type=zipfile.ZIP_STORED)
-        aligned = directory / "preview.apk"
-        run(build_tools / "zipalign", "-P", "16", "-f", "4", unsigned, aligned)
-        run(build_tools / "apksigner", "sign", "--ks", keystore,
-            "--ks-key-alias", "androiddebugkey", "--ks-pass", "pass:android",
-            "--key-pass", "pass:android", aligned)
-        run(build_tools / "apksigner", "verify", aligned)
-        with zipfile.ZipFile(aligned) as bundle:
+        prepared = []
+        for index, original in enumerate((apk, test_apk)):
+            unsigned = directory / f"unsigned-{index}.apk"
+            with zipfile.ZipFile(original) as source, zipfile.ZipFile(unsigned, "w") as output:
+                for item in source.infolist():
+                    if index == 0 and item.filename == library_entry:
+                        continue
+                    if re.match(r"META-INF/[^/]+\.(SF|RSA|DSA|EC)$", item.filename, re.I):
+                        continue
+                    if item.filename.upper() == "META-INF/MANIFEST.MF":
+                        continue
+                    output.writestr(item, source.read(item.filename))
+                if index == 0:
+                    output.writestr(library_entry, library, compress_type=zipfile.ZIP_STORED)
+            aligned = directory / f"preview-{index}.apk"
+            run(build_tools / "zipalign", "-P", "16", "-f", "4", unsigned, aligned)
+            run(build_tools / "apksigner", "sign", "--ks", keystore,
+                "--ks-key-alias", "androiddebugkey", "--ks-pass", "pass:android",
+                "--key-pass", "pass:android", aligned)
+            run(build_tools / "apksigner", "verify", aligned)
+            prepared.append((original, aligned))
+        with zipfile.ZipFile(prepared[0][1]) as bundle:
             assert hashlib.sha256(bundle.read(library_entry)).hexdigest() == LIBRARY_SHA256
-        apk.write_bytes(aligned.read_bytes())
+        for original, aligned in prepared:
+            original.write_bytes(aligned.read_bytes())
+            Path(str(original) + ".idsig").unlink(missing_ok=True)
     print("Prepared isolated preview with QuickJS x86_64 " + LIBRARY_SHA256)
 
 
