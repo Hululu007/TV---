@@ -12,14 +12,14 @@ import com.fongmi.android.tv.databinding.DialogUpdateBinding;
 import com.fongmi.android.tv.impl.UpdateListener;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 
-import java.util.Locale;
-
 public class UpdateDialog extends BaseAlertDialog {
 
     private DialogUpdateBinding binding;
     private UpdateListener listener;
     private String title;
     private String desc;
+    private int sourceAttempt;
+    private int sourceCount;
 
     public static UpdateDialog create() {
         return new UpdateDialog();
@@ -74,7 +74,18 @@ public class UpdateDialog extends BaseAlertDialog {
 
     public void setProgress(int progress) {
         AlertDialog dialog = (AlertDialog) getDialog();
-        if (dialog != null) dialog.getButton(AlertDialog.BUTTON_POSITIVE).setText(String.format(Locale.getDefault(), "%1$d%%", progress));
+        if (dialog != null) dialog.getButton(AlertDialog.BUTTON_POSITIVE).setText(getString(R.string.update_download_progress, sourceAttempt, sourceCount, progress));
+    }
+
+    public void setSource(int attempt, int total) {
+        sourceAttempt = attempt;
+        sourceCount = total;
+        setProgress(0);
+    }
+
+    public void setVerifying() {
+        AlertDialog dialog = (AlertDialog) getDialog();
+        if (dialog != null) dialog.getButton(AlertDialog.BUTTON_POSITIVE).setText(R.string.update_download_verifying);
     }
 
     @Override

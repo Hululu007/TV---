@@ -283,7 +283,15 @@
     <string name="update_latest">You are up to date</string>
     <string name="update_busy">An update check or download is already in progress</string>
     <string name="update_check_failed">Unable to check for updates. Please try again later.</string>
-    <string name="update_download_failed">Download or verification failed on all sources. Please try again.</string>
+    <string name="update_download_failed">Unable to download a complete update from any source. Please try again.</string>
+    <string name="update_download_progress">Route %1$d/%2$d · %3$d%%</string>
+    <string name="update_download_verifying">Verifying update…</string>
+    <string name="update_download_wrong_package">This update belongs to a different app.</string>
+    <string name="update_download_wrong_version">The downloaded update does not match the requested version.</string>
+    <string name="update_download_wrong_signature">This update has a different signing certificate and cannot replace this installation.</string>
+    <string name="update_download_wrong_abi">This update does not support this installation\'s CPU architecture.</string>
+    <string name="update_download_invalid_apk">Unable to read the downloaded update package.</string>
+    <string name="update_download_storage_failed">Unable to save the update. Check available storage and try again.</string>
     <string name="update_install_failed">Unable to open the package installer.</string>
 
     <!-- Crash -->

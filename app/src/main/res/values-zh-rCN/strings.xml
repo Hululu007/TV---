@@ -282,7 +282,15 @@
     <string name="update_latest">已是最新版本</string>
     <string name="update_busy">正在检查或下载更新，请稍候</string>
     <string name="update_check_failed">检查更新失败，请稍后重试</string>
-    <string name="update_download_failed">下载线路均失败或安装包校验未通过，请重试</string>
+    <string name="update_download_failed">所有线路均未能下载完整安装包，请重试</string>
+    <string name="update_download_progress">线路 %1$d/%2$d · %3$d%%</string>
+    <string name="update_download_verifying">正在校验安装包…</string>
+    <string name="update_download_wrong_package">下载的安装包属于其他应用，无法更新</string>
+    <string name="update_download_wrong_version">下载的安装包与待更新版本不一致</string>
+    <string name="update_download_wrong_signature">安装包签名与当前应用不同，无法覆盖安装</string>
+    <string name="update_download_wrong_abi">安装包不支持当前应用的处理器架构</string>
+    <string name="update_download_invalid_apk">无法解析下载的安装包</string>
+    <string name="update_download_storage_failed">无法保存安装包，请检查剩余存储空间后重试</string>
     <string name="update_install_failed">无法打开系统安装程序</string>
 
     <!-- Crash -->

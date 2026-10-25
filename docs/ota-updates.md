@@ -10,7 +10,7 @@
 https://github.com/wobuhui666/TV/releases/latest/download/leanback.json
 ```
 
-下载按当前应用的 mode、ABI 选择安装包。清单包含 APK 的大小和 SHA-256，每个 APK URL 固定到 `build-<run_id>-<run_attempt>`，避免检查完成后又下载到另一个版本。重新运行 workflow 使用新的 attempt tag，不覆盖已发布安装包。GitHub 镜像失败、超时或下载内容校验失败时，继续尝试其他候选，最后回退到 GitHub 官方地址。下载完成还需核对应用包名、版本和签名，验证通过后才交给 Android 安装器；取消下载不得触发安装。
+下载按当前应用的 mode、ABI 选择安装包。清单包含 APK 的大小和 SHA-256，每个 APK URL 固定到 `build-<run_id>-<run_attempt>`，避免检查完成后又下载到另一个版本。重新运行 workflow 使用新的 attempt tag，不覆盖已发布安装包。GitHub 镜像失败、超时或下载内容校验失败时，继续尝试其他候选，最后回退到 GitHub 官方地址。界面显示当前线路序号及该线路的下载进度，下载完成后显示正在校验。若 APK 已通过清单的 SHA-256 校验，但包名、版本、签名或 ABI 不兼容，则立即结束并提示具体原因；更换镜像仍会取得相同文件，不再重复下载。文件保存失败同样结束本次下载。验证通过后才交给 Android 安装器；取消下载不得触发安装。
 
 清单示例（哈希及大小仅为字段说明）：
 

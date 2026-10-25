@@ -184,16 +184,117 @@ public class UpdateDownloaderTest {
         }
     }
 
-    @Test public void failedApkValidationFallsBack() throws Exception {
+    @Test public void verifiedApkRejectionStopsWithoutDownloadingIdenticalBytesAgain() throws Exception {
         try (MockWebServer server = new MockWebServer()) {
             server.enqueue(response(APK)); server.enqueue(response(APK));
             AtomicInteger validations = new AtomicInteger();
-            downloader().download(sources(server), target(), APK.length, hash(APK), file -> {
+            List<Integer> progress = new ArrayList<>();
+            IOException rejection = new IOException("Wrong update signature");
+            IOException failure = assertThrows(IOException.class, () -> downloader().download(
+                    sources(server), target(), APK.length, hash(APK), file -> {
+                        validations.incrementAndGet();
+                        throw rejection;
+                    }, progress::add));
+            assertSame(rejection, failure);
+            assertEquals(1, validations.get());
+            assertEquals(1, server.getRequestCount());
+            assertEquals(1, java.util.Collections.frequency(progress, 0));
+            assertFalse(progress.contains(100));
+            assertClean();
+        }
+    }
+
+    @Test public void unverifiedApkValidationFailureStillFallsBack() throws Exception {
+        try (MockWebServer server = new MockWebServer()) {
+            server.enqueue(response(APK)); server.enqueue(response(APK));
+            AtomicInteger validations = new AtomicInteger();
+            downloader().download(sources(server), target(), APK.length, null, file -> {
                 if (validations.incrementAndGet() == 1) throw new IOException("Wrong APK package");
             }, null);
             assertEquals(2, validations.get());
             assertEquals(2, server.getRequestCount());
             assertArrayEquals(APK, Files.readAllBytes(target().toPath()));
+        }
+    }
+
+    @Test public void retryReportsSourceAndOnlyVerifiesCompleteMatchingBytes() throws Exception {
+        try (MockWebServer server = new MockWebServer()) {
+            byte[] corrupted = APK.clone();
+            corrupted[100] ^= 1;
+            server.enqueue(response(corrupted)); server.enqueue(response(APK));
+            List<String> events = new ArrayList<>();
+            downloader().download(sources(server), target(), APK.length, hash(APK), file -> {
+                assertEquals("verifying", events.get(events.size() - 1));
+            }, new UpdateDownloader.Progress() {
+                @Override public void update(int percent) {
+                    if (percent == 0 || percent == 100) events.add("progress " + percent);
+                }
+                @Override public void onSource(int attempt, int total) {
+                    events.add("source " + attempt + "/" + total);
+                }
+                @Override public void onVerifying() { events.add("verifying"); }
+            });
+            assertEquals(Arrays.asList("source 1/2", "progress 0", "source 2/2", "progress 0",
+                    "verifying", "progress 100"), events);
+            assertEquals(2, server.getRequestCount());
+        }
+    }
+
+    @Test public void localFinalizationFailureDoesNotRetryAnotherSourceEvenWithoutHash() throws Exception {
+        try (MockWebServer server = new MockWebServer()) {
+            server.enqueue(response(APK)); server.enqueue(response(APK));
+            IOException failure = assertThrows(IOException.class, () -> downloader().download(
+                    sources(server), target(), APK.length, null, file -> {
+                        assertTrue(target().mkdir());
+                    }, null));
+            assertEquals("Cannot finalize update file", failure.getMessage());
+            assertEquals(1, server.getRequestCount());
+            assertClean();
+        }
+    }
+
+    @Test public void localFileCreationFailureDoesNotRetryAnotherSource() throws Exception {
+        try (MockWebServer server = new MockWebServer()) {
+            server.enqueue(response(APK)); server.enqueue(response(APK));
+            assertThrows(UpdateDownloader.LocalFileException.class, () -> downloader().download(
+                    sources(server), target(), APK.length, null, file -> fail("Unsaved APK validated"),
+                    new UpdateDownloader.Progress() {
+                        @Override public void update(int percent) { assertNotEquals(100, percent); }
+                        @Override public void onSource(int attempt, int total) {
+                            assertTrue(new File(target().getPath() + ".part").mkdir());
+                        }
+                    }));
+            assertEquals(1, server.getRequestCount());
+            assertClean();
+        }
+    }
+
+    @Test public void cancellationFromSourceStatusNeverStartsRequest() throws Exception {
+        try (MockWebServer server = new MockWebServer()) {
+            UpdateDownloader downloader = downloader();
+            assertThrows(InterruptedIOException.class, () -> downloader.download(
+                    sources(server), target(), APK.length, hash(APK), file -> fail("Cancelled validation"),
+                    new UpdateDownloader.Progress() {
+                        @Override public void update(int percent) { fail("Cancelled progress"); }
+                        @Override public void onSource(int attempt, int total) { downloader.cancel(); }
+                    }));
+            assertEquals(0, server.getRequestCount());
+            assertClean();
+        }
+    }
+
+    @Test public void cancellationFromVerifyingStatusNeverValidatesOrFallsBack() throws Exception {
+        try (MockWebServer server = new MockWebServer()) {
+            server.enqueue(response(APK)); server.enqueue(response(APK));
+            UpdateDownloader downloader = downloader();
+            assertThrows(InterruptedIOException.class, () -> downloader.download(
+                    sources(server), target(), APK.length, hash(APK), file -> fail("Cancelled validation"),
+                    new UpdateDownloader.Progress() {
+                        @Override public void update(int percent) { assertNotEquals(100, percent); }
+                        @Override public void onVerifying() { downloader.cancel(); }
+                    }));
+            assertEquals(1, server.getRequestCount());
+            assertClean();
         }
     }
 

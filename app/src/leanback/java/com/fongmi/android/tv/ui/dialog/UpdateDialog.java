@@ -7,11 +7,10 @@ import androidx.annotation.NonNull;
 import androidx.fragment.app.FragmentActivity;
 import androidx.viewbinding.ViewBinding;
 
+import com.fongmi.android.tv.R;
 import com.fongmi.android.tv.databinding.DialogUpdateBinding;
 import com.fongmi.android.tv.impl.UpdateListener;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
-
-import java.util.Locale;
 
 public class UpdateDialog extends BaseAlertDialog {
 
@@ -19,6 +18,8 @@ public class UpdateDialog extends BaseAlertDialog {
     private UpdateListener listener;
     private String title;
     private String desc;
+    private int sourceAttempt;
+    private int sourceCount;
 
     public static UpdateDialog create() {
         return new UpdateDialog();
@@ -77,7 +78,17 @@ public class UpdateDialog extends BaseAlertDialog {
 
     public void setProgress(int progress) {
         if (binding == null) return;
-        binding.confirm.setText(String.format(Locale.getDefault(), "%1$d%%", progress));
+        binding.confirm.setText(getString(R.string.update_download_progress, sourceAttempt, sourceCount, progress));
+    }
+
+    public void setSource(int attempt, int total) {
+        sourceAttempt = attempt;
+        sourceCount = total;
+        setProgress(0);
+    }
+
+    public void setVerifying() {
+        if (binding != null) binding.confirm.setText(R.string.update_download_verifying);
     }
 
     private void onConfirm(View view) {

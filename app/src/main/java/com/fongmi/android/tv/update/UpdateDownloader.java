@@ -70,21 +70,27 @@ public final class UpdateDownloader {
         try (CacheLease lease = CacheLease.acquire(target, partial)) {
             File parent = target.getAbsoluteFile().getParentFile();
             if (parent != null && !parent.isDirectory() && !parent.mkdirs() && !parent.isDirectory()) {
-                throw new IOException("Cannot create update directory");
+                throw new LocalFileException("Cannot create update directory");
             }
             delete(target);
             delete(partial);
             IOException failures = new IOException("All update download sources failed");
-            for (String url : candidates) {
+            for (int index = 0; index < candidates.size(); index++) {
                 checkCancelled();
+                boolean verified = false;
                 try {
+                    publishSource(progress, index + 1, candidates.size());
                     publish(progress, 0);
-                    downloadSource(url, partial, expectedSize, expectedHash, progress);
+                    downloadSource(candidates.get(index), partial, expectedSize, expectedHash, progress);
                     checkCancelled();
+                    // Every source must return these exact bytes. A different mirror cannot
+                    // repair a package, version, signer or device rejection after SHA verification.
+                    verified = !expectedHash.isEmpty();
+                    publishVerifying(progress);
                     validator.validate(partial);
                     synchronized (lock) {
                         checkCancelled();
-                        if (!partial.renameTo(target)) throw new IOException("Cannot finalize update file");
+                        if (!partial.renameTo(target)) throw new LocalFileException("Cannot finalize update file");
                         publish(progress, 100);
                         checkCancelled();
                         completed = true;
@@ -93,6 +99,7 @@ public final class UpdateDownloader {
                     }
                 } catch (IOException failure) {
                     checkCancelled();
+                    if (verified || failure instanceof LocalFileException) throw failure;
                     failures.addSuppressed(failure);
                 } finally {
                     synchronized (lock) {
@@ -147,7 +154,7 @@ public final class UpdateDownloader {
             int lastPercent = 0;
             byte[] header = new byte[4];
             int headerSize = 0;
-            try (InputStream input = body.byteStream(); FileOutputStream output = new FileOutputStream(partial)) {
+            try (InputStream input = body.byteStream(); FileOutputStream output = openOutput(partial)) {
                 byte[] buffer = new byte[32768];
                 int read;
                 while ((read = input.read(buffer)) != -1) {
@@ -163,7 +170,11 @@ public final class UpdateDownloader {
                             throw new IOException("Update source returned an invalid APK header");
                         }
                     }
-                    output.write(buffer, 0, read);
+                    try {
+                        output.write(buffer, 0, read);
+                    } catch (IOException failure) {
+                        throw new LocalFileException("Cannot write update file", failure);
+                    }
                     digest.update(buffer, 0, read);
                     if (progressSize > 0) {
                         int percent = (int) Math.min(99, total * 100.0 / progressSize);
@@ -181,7 +192,11 @@ public final class UpdateDownloader {
                 if (!expectedHash.isEmpty() && !expectedHash.equalsIgnoreCase(hex(digest.digest()))) {
                     throw new IOException("Update SHA-256 mismatch");
                 }
-                output.getFD().sync();
+                try {
+                    output.getFD().sync();
+                } catch (IOException failure) {
+                    throw new LocalFileException("Cannot save update file", failure);
+                }
             }
         }
     }
@@ -194,6 +209,22 @@ public final class UpdateDownloader {
         }
     }
 
+    private void publishSource(Progress progress, int attempt, int total) throws IOException {
+        synchronized (lock) {
+            checkCancelled();
+            if (progress != null) progress.onSource(attempt, total);
+            checkCancelled();
+        }
+    }
+
+    private void publishVerifying(Progress progress) throws IOException {
+        synchronized (lock) {
+            checkCancelled();
+            if (progress != null) progress.onVerifying();
+            checkCancelled();
+        }
+    }
+
     private void checkCancelled() throws InterruptedIOException {
         if (cancelled || Thread.currentThread().isInterrupted()) {
             throw new InterruptedIOException("Update download cancelled");
@@ -201,7 +232,24 @@ public final class UpdateDownloader {
     }
 
     private static void delete(File file) throws IOException {
-        if (file.exists() && !file.delete()) throw new IOException("Cannot remove update file: " + file.getName());
+        if (file.exists() && !file.delete()) throw new LocalFileException("Cannot remove update file: " + file.getName());
+    }
+
+    private static FileOutputStream openOutput(File file) throws IOException {
+        try {
+            return new FileOutputStream(file) {
+                @Override
+                public void close() throws IOException {
+                    try {
+                        super.close();
+                    } catch (IOException failure) {
+                        throw new LocalFileException("Cannot close update file", failure);
+                    }
+                }
+            };
+        } catch (IOException failure) {
+            throw new LocalFileException("Cannot create update file", failure);
+        }
     }
 
     private static MessageDigest sha256() throws IOException {
@@ -227,5 +275,19 @@ public final class UpdateDownloader {
 
     public interface Progress {
         void update(int percent);
+
+        default void onSource(int attempt, int total) {}
+
+        default void onVerifying() {}
+    }
+
+    public static final class LocalFileException extends IOException {
+        private LocalFileException(String message) {
+            super(message);
+        }
+
+        private LocalFileException(String message, IOException cause) {
+            super(message, cause);
+        }
     }
 }
