@@ -100,7 +100,8 @@ public class VodPlaybackController {
         if (result.hasArtwork()) host.renderArtwork(result.getArtwork());
         Long sourcePosition = historyPolicy.acceptedResultPosition(state.getHistory(), result.getPosition());
         if (sourcePosition != null) state.getHistory().setPosition(sourcePosition);
-        startPlayback(result, startPositionMs());
+        boolean live = result.getTimeshift() != null && result.getTimeshift().isValid(System.currentTimeMillis());
+        startPlayback(result, live ? C.TIME_UNSET : startPositionMs());
         host.loadDanmaku(result, state.getHistory(), state.getEpisode());
         clearPreload();
     }
@@ -219,7 +220,7 @@ public class VodPlaybackController {
     public void replay() {
         if (state.getHistory() != null) state.getHistory().setPosition(C.TIME_UNSET);
         if (host.isPlayerEmpty()) refresh();
-        else host.replay(startPositionMs());
+        else host.replay(host.isTimeshiftPlayback() ? C.TIME_UNSET : startPositionMs());
     }
 
     public void refresh() {
@@ -299,7 +300,7 @@ public class VodPlaybackController {
 
     public void saveHistory(boolean exit, long time, long position, long duration) {
         History history = exit ? historyForExit() : currentHistory();
-        if (position > 0 && duration > 0) historyPolicy.updateTime(history, time, position, duration);
+        if (!host.isTimeshiftPlayback() && position > 0 && duration > 0) historyPolicy.updateTime(history, time, position, duration);
         historyPolicy.save(history, exit);
     }
 
@@ -308,6 +309,7 @@ public class VodPlaybackController {
     }
 
     public void onTimeChanged(long time, long position, long duration) {
+        if (host.isTimeshiftPlayback()) return;
         History history = currentHistory();
         historyPolicy.updateTime(history, time, position, duration);
         if (NextEpisodePreloader.shouldPrepare(position, duration, history == null ? 0 : history.getEnding())) preloadNext();

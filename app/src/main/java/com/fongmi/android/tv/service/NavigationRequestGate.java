@@ -1,6 +1,7 @@
 package com.fongmi.android.tv.service;
 
 import java.util.Objects;
+import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -13,13 +14,33 @@ import java.util.concurrent.atomic.AtomicLong;
 public final class NavigationRequestGate {
 
     private final AtomicLong generation = new AtomicLong();
+    private Future<?> task;
 
-    public Request begin(String mediaId, String playbackKey) {
-        return new Request(generation.incrementAndGet(), mediaId, playbackKey);
+    public synchronized Request begin(String mediaId, String playbackKey) {
+        Request request = new Request(generation.incrementAndGet(), mediaId, playbackKey);
+        cancelTask();
+        return request;
     }
 
-    public void invalidate() {
+    public synchronized void invalidate() {
         generation.incrementAndGet();
+        cancelTask();
+    }
+
+    /** A stale request must cancel its actual source work, including pending login dialogs. */
+    public synchronized void attach(Request request, Future<?> task) {
+        if (!isCurrent(request)) {
+            task.cancel(true);
+            return;
+        }
+        if (this.task != task) cancelTask();
+        this.task = task;
+    }
+
+    private void cancelTask() {
+        Future<?> previous = task;
+        task = null;
+        if (previous != null) previous.cancel(true);
     }
 
     public long snapshot() {

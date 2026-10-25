@@ -103,7 +103,14 @@ def action(ru, action):
 
 
 def destroy(ru):
+    closeDialog(ru)
     ru.destroy()
+
+
+def closeDialog(ru):
+    dialog = getattr(ru, '_tv_dialog', None)
+    if dialog is not None:
+        dialog.close()
 
 
 def run():
@@ -114,6 +121,8 @@ if __name__ == '__main__':
     run()
 
 
-def bind(ru, native_net, native_local):
+def bind(ru, native_net, native_local, native_dialog=None):
     from base.net import bind as bind_api
     bind_api(ru, native_net, native_local)
+    from _tv_dialog import DialogAdapter
+    ru._tv_dialog = DialogAdapter(native_dialog)

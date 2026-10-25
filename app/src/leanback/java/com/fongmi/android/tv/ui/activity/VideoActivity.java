@@ -1481,6 +1481,7 @@ public class VideoActivity extends PlaybackActivity implements VodPlaybackHost, 
             case "parse", "subtitle", "text", "audio", "video", "danmaku", "player", "edition", "chapter", "syncplay" -> playbackPanelCommand = key;
         }
         switch (key) {
+            case "timeshift_live" -> returnToLive();
             case "prev" -> checkPrev();
             case "next" -> checkNext();
             case "change" -> onChange();
@@ -1549,6 +1550,12 @@ public class VideoActivity extends PlaybackActivity implements VodPlaybackHost, 
         syncJetStreamControl();
     }
 
+    @Override
+    protected void onTimeshiftChanged() {
+        super.onTimeshiftChanged();
+        if (mBinding != null) mBinding.control.jetstream.setTimeshiftEnabled(isTimeshiftPlayback());
+    }
+
     private void syncJetStreamControl() {
         if (mBinding == null) return;
         boolean owner = service() != null && isOwner();
@@ -1557,6 +1564,7 @@ public class VideoActivity extends PlaybackActivity implements VodPlaybackHost, 
         boolean danmakuEnabled = DanmakuSetting.isLoad() && DanmakuSetting.isShow();
         if (owner) player().setDanmakuEnabled(danmakuEnabled);
         mBinding.control.jetstream.setPlayer(controller());
+        mBinding.control.jetstream.setTimeshiftEnabled(isTimeshiftPlayback());
         mBinding.control.jetstream.setMediaTitle(getJetStreamTitle(), getJetStreamSecondaryText(), getJetStreamTertiaryText());
         mBinding.control.jetstream.setPlaybackState(playing, repeating);
         mBinding.control.jetstream.setDanmakuToggle(owner, danmakuEnabled);

@@ -44,7 +44,7 @@ public final class FolderFilterNavigationTest {
         main(() -> fixture = TvFolderPreviewActivity.openFixture(instrumentation.getTargetContext()));
         activity = (TvFolderPreviewActivity) instrumentation.startActivitySync(intent());
         await("root category loads", () -> TvFolderPreviewActivity.ROOT_ID.equals(activity.currentCategoryId())
-                && fixture.requested(TvFolderPreviewActivity.ROOT_ID, null));
+                && fixture.requested(TvFolderPreviewActivity.ROOT_ID, null) && categoryEntryVisible(TvFolderPreviewActivity.ROOT_ID));
     }
 
     @After
@@ -128,6 +128,7 @@ public final class FolderFilterNavigationTest {
         main(() -> {
             assertEquals(2, activity.folder().getChildFragmentManager().getBackStackEntryCount());
             assertEquals("folder-level-2", activity.currentCategoryId());
+            assertTrue("The current folder retains its rendered results", categoryEntryVisible("folder-level-2"));
             assertNull(filterOption());
         });
         capture("cancelled-filter-keeps-folder");
@@ -136,10 +137,10 @@ public final class FolderFilterNavigationTest {
     private void openNestedFolders() {
         main(() -> activity.folder().openFolder("folder-level-1", new HashMap<>()));
         await("first folder loads", () -> "folder-level-1".equals(activity.currentCategoryId())
-                && fixture.requested("folder-level-1", null));
+                && fixture.requested("folder-level-1", null) && categoryEntryVisible("folder-level-1"));
         main(() -> activity.folder().openFolder("folder-level-2", new HashMap<>()));
         await("second folder loads", () -> "folder-level-2".equals(activity.currentCategoryId())
-                && fixture.requested("folder-level-2", null));
+                && fixture.requested("folder-level-2", null) && categoryEntryVisible("folder-level-2"));
     }
 
     private void awaitRootFilters() {
@@ -161,9 +162,15 @@ public final class FolderFilterNavigationTest {
         return category == null ? null : findText(category.getView(), TvFolderPreviewActivity.FILTER_OPTION);
     }
 
+    private boolean categoryEntryVisible(String id) {
+        TypeFragment category = activity.currentCategory();
+        return category != null && findText(category.getView(), "Entry in " + id) != null;
+    }
+
     private TextView findText(View view, String text) {
         if (view == null || !view.isShown()) return null;
-        if (view instanceof TextView label && text.contentEquals(label.getText())) return label;
+        if (view instanceof TextView label && view.getWidth() > 0 && view.getHeight() > 0
+                && text.contentEquals(label.getText())) return label;
         if (view instanceof ViewGroup group) {
             for (int i = 0; i < group.getChildCount(); i++) {
                 TextView found = findText(group.getChildAt(i), text);

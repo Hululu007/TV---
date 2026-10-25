@@ -7,6 +7,7 @@ import com.fongmi.android.tv.bean.Result;
 import com.fongmi.android.tv.bean.Site;
 import com.fongmi.android.tv.source.health.SourceHealthManager;
 import com.github.catvod.utils.Trans;
+import com.github.catvod.utils.CallTimeout;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -24,7 +25,7 @@ public final class DiscoverSourceSearch {
 
     private final BoundedSearchBatch<Job, Result> batch = new BoundedSearchBatch<>();
     private final AtomicLong generation = new AtomicLong();
-    private Runnable deadline;
+    private CallTimeout deadline;
     private SiteApi.SearchRequest request;
     private int returned;
 
@@ -44,35 +45,38 @@ public final class DiscoverSourceSearch {
                     SourceHealthManager.attempt(scope, query.site.getKey(), SourceHealthManager.Phase.SEARCH)));
         }
         if (jobs.isEmpty()) { listener.onComplete(false); return; }
-        deadline = () -> {
+        CallTimeout sessionDeadline = deadline = new CallTimeout(30_000);
+        sessionDeadline.start(() -> App.post(() -> {
             if (generation.get() != current) return;
             stop();
             listener.onComplete(true);
-        };
-        App.post(deadline, 30_000);
-        batch.start(jobs, job -> () -> {
-            job.attempt.start();
-            try { return SiteApi.searchRawContent(job.site, job.keyword, false, "1", currentRequest); }
-            finally { job.attempt.finish(); }
-        }, new BoundedSearchBatch.Observer<>() {
-            @Override public void success(Job job, Result result, long elapsedMs) {
-                deliver(job, result, null);
-            }
-            @Override public void failure(Job job, Throwable error, long elapsedMs) {
-                deliver(job, null, error);
-            }
-            private void deliver(Job job, Result result, Throwable error) {
-                App.post(() -> {
-                    if (generation.get() != current) return;
-                    job.attempt.complete(result, error);
-                    listener.onResult(result, ++returned, jobs.size());
-                    if (returned == jobs.size()) {
-                        stop();
-                        listener.onComplete(false);
-                    }
-                });
-            }
-        }, Constant.TIMEOUT_SEARCH);
+        }));
+        Runnable restore = sessionDeadline.enter();
+        try {
+            batch.start(jobs, job -> () -> {
+                job.attempt.start();
+                try { return SiteApi.searchRawContent(job.site, job.keyword, false, "1", currentRequest); }
+                finally { job.attempt.finish(); }
+            }, new BoundedSearchBatch.Observer<>() {
+                @Override public void success(Job job, Result result, long elapsedMs) {
+                    deliver(job, result, null);
+                }
+                @Override public void failure(Job job, Throwable error, long elapsedMs) {
+                    deliver(job, null, error);
+                }
+                private void deliver(Job job, Result result, Throwable error) {
+                    App.post(() -> {
+                        if (generation.get() != current) return;
+                        job.attempt.complete(result, error);
+                        listener.onResult(result, ++returned, jobs.size());
+                        if (returned == jobs.size()) {
+                            stop();
+                            listener.onComplete(false);
+                        }
+                    });
+                }
+            }, Constant.TIMEOUT_SEARCH);
+        } finally { restore.run(); }
     }
 
     static List<Query> queries(List<Site> sites, List<String> keywords, List<String> priorityKeys) {
@@ -101,7 +105,7 @@ public final class DiscoverSourceSearch {
         batch.stop();
         if (request != null) request.cancel();
         request = null;
-        if (deadline != null) App.removeCallbacks(deadline);
+        if (deadline != null) deadline.close();
         deadline = null;
     }
 

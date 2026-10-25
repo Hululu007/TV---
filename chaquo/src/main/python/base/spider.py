@@ -69,11 +69,20 @@ class Spider(metaclass=ABCMeta):
     def getName(self):
         pass
 
+    def dialog(self, options, onAction=None):
+        bridge = getattr(self, '_tv_dialog', None)
+        if bridge is None:
+            raise RuntimeError("Dialog bridge is unavailable")
+        return bridge.show(options, onAction)
+
     def getDependence(self):
         return []
 
     def loadSpider(self, name):
-        return self.loadModule(name).Spider()
+        spider = self.loadModule(name).Spider()
+        if hasattr(self, '_tv_dialog'):
+            spider._tv_dialog = self._tv_dialog
+        return spider
 
     def loadModule(self, name):
         cache_dir = Python.getPlatform().getApplication().getCacheDir().getAbsolutePath()

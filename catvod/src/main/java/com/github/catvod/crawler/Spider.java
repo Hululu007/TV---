@@ -8,6 +8,7 @@ import com.github.catvod.Init;
 import com.github.catvod.Proxy;
 import com.github.catvod.net.Net;
 import com.github.catvod.utils.Local;
+import com.github.catvod.utils.Dialog;
 
 import com.github.catvod.net.OkHttp;
 
@@ -23,6 +24,7 @@ public abstract class Spider {
     public String siteKey;
     public Net net;
     public Local local;
+    public final Dialog dialog = new Dialog();
 
     public static Dns safeDns() {
         return OkHttp.dns();

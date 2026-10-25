@@ -128,6 +128,22 @@
             tools:text="00:30 / 01:30"
             tools:visibility="visible" />
 
+        <com.google.android.material.textview.MaterialTextView
+            android:id="@+id/timeshift_live"
+            android:layout_width="wrap_content"
+            android:layout_height="48dp"
+            android:layout_gravity="end"
+            android:layout_marginEnd="16dp"
+            android:background="?attr/selectableItemBackground"
+            android:clickable="true"
+            android:focusable="true"
+            android:gravity="center"
+            android:paddingHorizontal="16dp"
+            android:text="@string/timeshift_return_live"
+            android:textColor="@color/white"
+            android:textSize="14sp"
+            android:visibility="gone" />
+
         <androidx.media3.ui.PlayerSeekView
             android:id="@+id/seek"
             android:layout_width="match_parent"

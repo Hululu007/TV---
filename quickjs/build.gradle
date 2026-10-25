@@ -24,6 +24,7 @@ dependencies {
     implementation libs.jsoup
     implementation libs.quickjs.android
     implementation libs.quickjs.java
+    testImplementation project(':catvod')
     testImplementation libs.junit
     testImplementation libs.json.test
     coreLibraryDesugaring libs.desugar

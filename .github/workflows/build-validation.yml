@@ -100,6 +100,7 @@ jobs:
         run: |
           python -m unittest discover -s chaquo/src/test/python -v
           node quickjs/src/test/js/net.test.cjs
+          node quickjs/src/test/js/dialog.test.cjs
 
       - name: Check application regression tests
         if: matrix.package == 'sourceprobe'

@@ -140,11 +140,12 @@ public final class NetBridge implements AutoCloseable {
 
     private void start(Net owner, JsonObject params) throws Exception {
         int id = params.get("id").getAsInt();
+        Invocation invocation = Invocation.current();
         String operation = string(params, "operation");
         String optionsJson = json(params, "options");
         CompletableFuture<String> future;
         if (operation.equals("cached") || operation.equals("refresh")) {
-            Loader loader = new Loader(id);
+            Loader loader = new Loader(id, invocation);
             try {
                 if (operation.equals("refresh")) {
                     JsonObject options = Json.strict(optionsJson).getAsJsonObject();
@@ -153,11 +154,11 @@ public final class NetBridge implements AutoCloseable {
                 }
                 future = owner.cachedAsync(string(params, "key"), optionsJson, loader::start);
             } catch (Exception error) {
-                emit("releaseLoader", id, "");
+                emit("releaseLoader", id, "", invocation);
                 throw error;
             }
             future.whenComplete((value, error) -> {
-                if (!loader.started.get()) emit("releaseLoader", id, "");
+                if (!loader.started.get()) emit("releaseLoader", id, "", invocation);
             });
         } else {
             NetOptions options = NetOptions.from(optionsJson);
@@ -187,7 +188,7 @@ public final class NetBridge implements AutoCloseable {
         pending.put(id, future);
         future.whenComplete((value, error) -> {
             pending.remove(id);
-            emit(operation.equals("refresh") ? "refreshed" : "result", id, error == null ? success(value) : failure(error));
+            emit(operation.equals("refresh") ? "refreshed" : "result", id, error == null ? success(value) : failure(error), invocation);
         });
     }
 
@@ -237,12 +238,12 @@ public final class NetBridge implements AutoCloseable {
         if (owner != null) owner.close();
     }
 
-    private void emit(String kind, int id, String json) {
+    private void emit(String kind, int id, String json, Invocation invocation) {
         if (closed) return;
         try {
-            executor.execute(() -> {
+            executor.execute(Invocation.wrap(invocation, () -> {
                 if (!closed && deliver != null) deliver.callVoid(kind, id, json);
-            });
+            }));
         } catch (RejectedExecutionException ignored) {
             // close releases the sole owned JS callback on the JS executor.
         }
@@ -275,8 +276,9 @@ public final class NetBridge implements AutoCloseable {
     private final class Loader {
         final int id;
         final AtomicBoolean started = new AtomicBoolean();
+        final Invocation invocation;
 
-        Loader(int id) { this.id = id; }
+        Loader(int id, Invocation invocation) { this.id = id; this.invocation = invocation; }
 
         CompletableFuture<String> start() {
             started.set(true);
@@ -284,10 +286,10 @@ public final class NetBridge implements AutoCloseable {
             loading.put(id, value);
             value.whenComplete((result, error) -> {
                 loading.remove(id, value);
-                emit("releaseLoader", id, "");
+                emit("releaseLoader", id, "", invocation);
             });
             if (closed) value.completeExceptionally(new InterruptedIOException("Network bridge closed"));
-            else emit("load", id, "");
+            else emit("load", id, "", invocation);
             return value;
         }
     }

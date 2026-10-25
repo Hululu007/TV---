@@ -4,22 +4,32 @@ import android.text.TextUtils;
 
 import com.orhanobut.logger.Logger;
 import com.github.catvod.crawler.diagnostics.DiagnosticLog;
+import com.github.catvod.utils.CallTimeout;
 
 public class SpiderDebug {
 
     private static final String TAG = SpiderDebug.class.getSimpleName();
 
     public static void log(Throwable th) {
+        if (CallTimeout.currentHasDialog()) {
+            log("[source dialog failure omitted]");
+            return;
+        }
         DiagnosticLog.record("jar", th);
         if (th != null) th.printStackTrace();
     }
 
     public static void log(String msg) {
+        if (CallTimeout.currentHasDialog()) msg = "[source dialog content omitted]";
         DiagnosticLog.record("jar", msg);
         if (!TextUtils.isEmpty(msg)) Logger.t(TAG).d(msg);
     }
 
     public static void log(String tag, String msg, Object... args) {
+        if (CallTimeout.currentHasDialog()) {
+            msg = "[source dialog content omitted]";
+            args = new Object[0];
+        }
         if (DiagnosticLog.isEnabled()) {
             String formatted = msg;
             try {

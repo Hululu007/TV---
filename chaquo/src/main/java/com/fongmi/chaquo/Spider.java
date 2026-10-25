@@ -33,7 +33,7 @@ public class Spider extends com.github.catvod.crawler.Spider {
         try {
             SpiderRuntime.bind(this, siteKey);
             obj.put("siteKey", siteKey);
-            app.callAttr("bind", obj, net, local);
+            app.callAttr("bind", obj, net, local, dialog);
             PyObject dependence = app.callAttr("getDependence", obj);
             if (dependence != null) for (PyObject item : dependence.asList()) download(item + ".py");
             app.callAttr("init", obj, extend);

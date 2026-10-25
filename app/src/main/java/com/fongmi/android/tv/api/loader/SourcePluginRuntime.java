@@ -1,5 +1,7 @@
 package com.fongmi.android.tv.api.loader;
 
+import com.github.catvod.utils.CallTimeout;
+
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -25,11 +27,14 @@ final class SourcePluginRuntime extends ThreadGroup {
         // Reentrant source loading must not wait on another thread while holding jar locks.
         if (parentOf(Thread.currentThread().getThreadGroup())) return action.get();
         AtomicBoolean canceled = new AtomicBoolean();
+        CallTimeout deadline = CallTimeout.current();
         FutureTask<T> task = new FutureTask<>(() -> {
             cancellation.set(canceled);
+            Runnable restore = deadline == null ? () -> {} : deadline.enter();
             try {
                 return action.get();
             } finally {
+                restore.run();
                 cancellation.remove();
             }
         });

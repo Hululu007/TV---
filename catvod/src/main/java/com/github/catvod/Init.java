@@ -2,7 +2,11 @@ package com.github.catvod;
 
 import android.content.Context;
 import android.app.Activity;
+import com.github.catvod.utils.CompletableFutures;
 import java.util.function.Consumer;
+import java.util.function.BiFunction;
+import java.util.function.Function;
+import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
 
 import java.lang.ref.WeakReference;
@@ -12,6 +16,7 @@ public class Init {
     private volatile WeakReference<Context> context;
     private volatile Supplier<Activity> activity;
     private volatile Consumer<String> toast;
+    private volatile BiFunction<String, Function<String, CompletableFuture<String>>, CompletableFuture<String>> dialog;
 
     private static Init get() {
         return Loader.INSTANCE;
@@ -43,6 +48,16 @@ public class Init {
     public static void toast(String text) {
         Consumer<String> consumer = get().toast;
         if (consumer != null) consumer.accept(text);
+    }
+
+    public static void setDialog(BiFunction<String, Function<String, CompletableFuture<String>>, CompletableFuture<String>> host) {
+        get().dialog = host;
+    }
+
+    public static CompletableFuture<String> dialog(String options, Function<String, CompletableFuture<String>> onAction) {
+        var host = get().dialog;
+        if (host == null) return CompletableFutures.failedFuture(new UnsupportedOperationException("Dialog requires a compatible App"));
+        return host.apply(options, onAction);
     }
 
     private static class Loader {

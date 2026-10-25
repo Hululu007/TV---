@@ -102,6 +102,7 @@ public class App extends Application implements Application.ActivityLifecycleCal
         registerActivityLifecycleCallbacks(this);
         Init.setActivity(App::activity);
         Init.setToast(text -> App.post(() -> Notify.show(text)));
+        Init.setDialog(com.fongmi.android.tv.ui.dialog.SpiderDialog::show);
     }
 
     @Override

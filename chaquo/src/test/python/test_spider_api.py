@@ -162,6 +162,7 @@ class SpiderApiTest(unittest.TestCase):
         self.requests = modules["requests"]
         self.net_module = self.load("base.net", ROOT / "base" / "net.py")
         self.spider_module = self.load("base.spider", ROOT / "base" / "spider.py")
+        self.load("_tv_dialog", ROOT / "_tv_dialog.py")
         self.app = self.load("test_python_app", ROOT / "app.py")
         self.native = Native()
         self.net = self.net_module.Net(self.native)

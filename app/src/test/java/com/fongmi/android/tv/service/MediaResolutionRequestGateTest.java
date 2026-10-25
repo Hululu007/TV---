@@ -116,4 +116,21 @@ public class MediaResolutionRequestGateTest {
         assertTrue(gate.cancel(current.generation()));
         assertFalse(gate.isPending());
     }
+    @org.junit.Test public void cancelledOrReplacedResolutionAlsoCancelsItsSourceWork() {
+        MediaResolutionRequestGate gate = new MediaResolutionRequestGate();
+        NavigationRequestGate.Request first = gate.begin("one", "source");
+        java.util.concurrent.CompletableFuture<Void> old = new java.util.concurrent.CompletableFuture<>();
+        gate.attach(first, old);
+        NavigationRequestGate.Request next = gate.begin("two", "source");
+        org.junit.Assert.assertTrue(old.isCancelled());
+        java.util.concurrent.CompletableFuture<Void> active = new java.util.concurrent.CompletableFuture<>();
+        gate.attach(next, active);
+        java.util.concurrent.CompletableFuture<Void> stale = new java.util.concurrent.CompletableFuture<>();
+        gate.attach(first, stale);
+        org.junit.Assert.assertTrue(stale.isCancelled());
+        org.junit.Assert.assertFalse(active.isDone());
+        org.junit.Assert.assertTrue(gate.cancel(next));
+        org.junit.Assert.assertTrue(active.isCancelled());
+    }
+
 }

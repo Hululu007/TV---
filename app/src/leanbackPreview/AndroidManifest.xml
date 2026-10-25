@@ -12,5 +12,11 @@
         <activity android:name=".ui.activity.TvFolderPreviewActivity"
             android:exported="false" android:screenOrientation="landscape"
             android:launchMode="singleTask" android:theme="@style/Theme.App" />
+        <activity android:name=".ui.activity.SpiderDialogPreviewActivity"
+            android:exported="false" android:screenOrientation="landscape"
+            android:theme="@style/Theme.App" />
+        <activity android:name=".ui.activity.TimeshiftPreviewActivity"
+            android:exported="false" android:screenOrientation="landscape"
+            android:theme="@style/Theme.App" />
     </application>
 </manifest>

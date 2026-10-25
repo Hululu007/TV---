@@ -23,12 +23,38 @@ collect() {
     adb shell dumpsys activity exit-info "$pkg" > "$out/exit-info.txt" 2>&1 || true
 }
 trap collect EXIT
-adb logcat -c
-adb shell am instrument -w -r -e class "$classes" "$test_pkg/androidx.test.runner.AndroidJUnitRunner" | tee "$out/instrumentation.txt"
-python3 - "$out/instrumentation.txt" <<'PY'
+IFS=',' read -r -a suites <<< "$classes"
+for suite in "${suites[@]}"; do
+    [[ "$suite" =~ ^[a-zA-Z_][a-zA-Z0-9_.]*$ ]] || exit 1
+    adb logcat -c
+    # A crash in one feature must not prevent the other features from producing evidence.
+    # The final summary still fails the job unless every instrumentation invocation passes.
+    if adb shell am instrument -w -r -e class "$suite" "$test_pkg/androidx.test.runner.AndroidJUnitRunner" | tee "$out/$suite.txt"; then
+        printf '0' > "$out/$suite.status"
+    else
+        printf '1' > "$out/$suite.status"
+    fi
+    adb logcat -b all -d -v threadtime > "$out/$suite-logcat.txt" 2>&1 || true
+    adb exec-out screencap -p > "$out/$suite-screen.png" 2>/dev/null || true
+done
+python3 - "$out" "$classes" <<'PY'
 from pathlib import Path
-import re, sys
-result = Path(sys.argv[1]).read_text()
-if not re.search(r'^OK \([1-9][0-9]* tests?\)', result, re.M):
-    raise SystemExit('Upstream feature instrumentation did not pass')
+import json, os, re, sys
+root = Path(sys.argv[1])
+results = []
+output = []
+for name in sys.argv[2].split(','):
+    content = (root / (name + '.txt')).read_text()
+    output.extend([name, content])
+    match = re.search(r'^OK \(([1-9][0-9]*) tests?\)', content, re.M)
+    passed = match is not None and (root / (name + '.status')).read_text() == '0'
+    results.append({'class': name, 'passed': passed, 'tests': int(match[1]) if match else None})
+passed = all(item['passed'] for item in results)
+summary = {'headSha': os.environ.get('GITHUB_SHA'), 'passed': passed, 'suites': results,
+           'passedTests': sum(item['tests'] or 0 for item in results if item['passed'])}
+(root / 'suite-summary.json').write_text(json.dumps(summary, indent=2) + '\n')
+(root / 'instrumentation.txt').write_text('\n'.join(output))
+print(json.dumps(summary, indent=2))
+if not passed:
+    raise SystemExit('One or more upstream feature instrumentation suites failed')
 PY

@@ -2,6 +2,7 @@ package com.github.catvod.net;
 
 import com.github.catvod.net.CacheOptions;
 import com.github.catvod.net.NetStore;
+import com.github.catvod.utils.CompletableFutures;
 import com.github.catvod.utils.Json;
 import com.google.gson.JsonObject;
 import java.io.InterruptedIOException;
@@ -91,13 +92,13 @@ implements AutoCloseable {
         synchronized (netCache) {
             Entry entry;
             if (this.closed) {
-                return CompletableFuture.failedFuture(NetCache.canceled());
+                return CompletableFutures.failedFuture(NetCache.canceled());
             }
             if (key == null || key.isEmpty() || loader == null) {
-                return CompletableFuture.failedFuture(new IllegalArgumentException("Invalid cache options"));
+                return CompletableFutures.failedFuture(new IllegalArgumentException("Invalid cache options"));
             }
             if (options.persist && this.read == null) {
-                return CompletableFuture.failedFuture(new IllegalArgumentException("Persistent cache requires a site owner"));
+                return CompletableFutures.failedFuture(new IllegalArgumentException("Persistent cache requires a site owner"));
             }
             Entry entry2 = entry = options.ttl == 0L ? null : this.entries.get(key);
             if (options.ttl > 0L && entry == null && options.persist) {
@@ -111,7 +112,7 @@ implements AutoCloseable {
             }
             if (options.ttl > 0L && entry == null) {
                 if (this.entries.size() == 64 && !this.evict()) {
-                    return CompletableFuture.failedFuture(new IllegalStateException("Cache capacity exceeded"));
+                    return CompletableFutures.failedFuture(new IllegalStateException("Cache capacity exceeded"));
                 }
                 entry = new Entry();
                 this.entries.put(key, entry);

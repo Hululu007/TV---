@@ -1,6 +1,7 @@
 package com.fongmi.android.tv.api.loader;
 
 import com.github.catvod.spider.FailingNativePlugin;
+import com.github.catvod.utils.CallTimeout;
 
 import org.junit.Test;
 
@@ -161,6 +162,30 @@ public class SourcePluginRuntimeTest {
         caller.join();
         assertTrue(finished.await(1, TimeUnit.SECONDS));
         assertEquals(Boolean.TRUE, canceled.get());
+    }
+
+    @Test(timeout = 3000)
+    public void sourceInitializationDialogCanPauseItsCallingDeadline() {
+        SourcePluginRuntime runtime = new SourcePluginRuntime(error -> fail());
+        CountDownLatch expired = new CountDownLatch(1);
+        try (CallTimeout deadline = new CallTimeout(150)) {
+            Runnable restore = deadline.enter();
+            try {
+                runtime.call(() -> {
+                    assertSame(deadline, CallTimeout.current());
+                    Runnable resume = CallTimeout.suspendCurrent();
+                    deadline.start(expired::countDown);
+                    try {
+                        assertFalse(expired.await(250, TimeUnit.MILLISECONDS));
+                    } catch (InterruptedException error) {
+                        throw new AssertionError(error);
+                    } finally { resume.run(); }
+                    return null;
+                });
+                assertSame(deadline, CallTimeout.current());
+            } finally { restore.run(); }
+        }
+        assertNull(CallTimeout.current());
     }
 
     private static StackTraceElement frame(String name) {

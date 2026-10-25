@@ -12,6 +12,8 @@ import java.util.ArrayList;
 
 public interface VodPlaybackHost {
 
+    default boolean isTimeshiftPlayback() { return false; }
+
     default boolean canPreloadNext() { return false; }
 
     default boolean preloadPlayback(Result result, long position, History history, Episode episode) { return false; }

@@ -1,6 +1,9 @@
 package com.fongmi.android.tv.model;
 
 import org.junit.Test;
+import com.github.catvod.utils.CallTimeout;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -104,6 +107,76 @@ public class BoundedSearchBatchTest {
             assertEquals(60, failures.get());
             assertTrue(maximum.get() <= 6);
         } finally { first.stop(); second.stop(); }
+    }
+
+    @Test(timeout = 10000) public void inputWaitDoesNotExpireSearchOrDiscardItsLateWallTimeResult() throws Exception {
+        BoundedSearchBatch<Integer, Integer> batch = new BoundedSearchBatch<>();
+        CountDownLatch waiting = new CountDownLatch(3), release = new CountDownLatch(1), results = new CountDownLatch(3);
+        AtomicInteger failures = new AtomicInteger();
+        try {
+            batch.start(sites(3), source -> () -> {
+                Runnable resume = CallTimeout.suspendCurrent();
+                waiting.countDown();
+                try { release.await(); }
+                finally { resume.run(); }
+                return source;
+            }, observer(results, failures), 250);
+            assertTrue(waiting.await(2, TimeUnit.SECONDS));
+            Thread.sleep(400);
+            release.countDown();
+            assertTrue(results.await(3, TimeUnit.SECONDS));
+            assertEquals(0, failures.get());
+        } finally { release.countDown(); batch.stop(); }
+    }
+
+    @Test(timeout = 10000) public void queuedWorkerRetainsWholeSearchParentDeadline() throws Exception {
+        BoundedSearchBatch<Integer, Integer> batch = new BoundedSearchBatch<>();
+        CountDownLatch waiting = new CountDownLatch(1), release = new CountDownLatch(1), results = new CountDownLatch(1), expired = new CountDownLatch(1);
+        try (CallTimeout session = new CallTimeout(250)) {
+            Runnable restore = session.enter();
+            try {
+                batch.start(sites(1), source -> () -> {
+                    Runnable resume = CallTimeout.suspendCurrent();
+                    waiting.countDown();
+                    try { release.await(); }
+                    finally { resume.run(); }
+                    return source;
+                }, observer(results, new AtomicInteger()), 2000);
+            } finally { restore.run(); }
+            assertTrue(waiting.await(2, TimeUnit.SECONDS));
+            session.start(expired::countDown);
+            assertFalse(expired.await(400, TimeUnit.MILLISECONDS));
+            release.countDown();
+            assertTrue(results.await(2, TimeUnit.SECONDS));
+        } finally { release.countDown(); batch.stop(); }
+    }
+
+    @Test(timeout = 10000) public void cancelledInputWaitClosesDialogsButRetainsUninterruptibleSlots() throws Exception {
+        BoundedSearchBatch<Integer, Integer> batch = new BoundedSearchBatch<>();
+        List<CompletableFuture<String>> dialogs = new CopyOnWriteArrayList<>();
+        CountDownLatch entered = new CountDownLatch(6), release = new CountDownLatch(1), next = new CountDownLatch(1);
+        AtomicInteger callbacks = new AtomicInteger();
+        try {
+            batch.start(sites(6), source -> () -> {
+                CompletableFuture<String> dialog = new CompletableFuture<>();
+                dialogs.add(dialog);
+                CallTimeout.trackCurrent(dialog);
+                Runnable resume = CallTimeout.suspendCurrent();
+                entered.countDown();
+                try {
+                    while (release.getCount() != 0) try { release.await(); } catch (InterruptedException ignored) {}
+                    return source;
+                } finally { resume.run(); }
+            }, counting(callbacks), 1000);
+            assertTrue(entered.await(2, TimeUnit.SECONDS));
+            batch.stop();
+            assertTrue(dialogs.stream().allMatch(CompletableFuture::isCancelled));
+            batch.start(sites(1), source -> () -> source, observer(next, new AtomicInteger()), 1000);
+            assertFalse(next.await(150, TimeUnit.MILLISECONDS));
+            release.countDown();
+            assertTrue(next.await(3, TimeUnit.SECONDS));
+            assertEquals(0, callbacks.get());
+        } finally { release.countDown(); batch.stop(); }
     }
 
     private static BoundedSearchBatch.Observer<Integer, Integer> observer(CountDownLatch results, AtomicInteger failures) {

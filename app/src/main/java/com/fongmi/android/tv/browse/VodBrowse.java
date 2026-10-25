@@ -83,7 +83,7 @@ class VodBrowse {
         try {
             for (Site site : sites) {
                 if (Thread.currentThread().isInterrupted() || System.nanoTime() >= deadline) break;
-                futures.add(Task.largeExecutor().submit(() -> searchSite(site, keyword, request)));
+                futures.add(Task.submitLarge(() -> searchSite(site, keyword, request), TimeUnit.SECONDS.toMillis(SEARCH_TIMEOUT), false));
             }
             items = SearchResultCollector.collect(futures, SEARCH_LIMIT, deadline);
         } finally {

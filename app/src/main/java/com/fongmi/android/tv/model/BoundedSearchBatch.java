@@ -1,13 +1,13 @@
 package com.fongmi.android.tv.model;
 
+import com.github.catvod.utils.CallTimeout;
+
 import java.util.ArrayList;
 import java.util.ArrayDeque;
 import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.Callable;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
@@ -23,13 +23,8 @@ final class BoundedSearchBatch<S, R> {
                 thread.setDaemon(true);
                 return thread;
             });
-    private static final ScheduledThreadPoolExecutor TIMER = new ScheduledThreadPoolExecutor(1, runnable -> {
-        Thread thread = new Thread(runnable, "source-search-timeout");
-        thread.setDaemon(true);
-        return thread;
-    });
     private static int workers;
-    static { WORKERS.allowCoreThreadTimeOut(true); TIMER.setRemoveOnCancelPolicy(true); }
+    static { WORKERS.allowCoreThreadTimeOut(true); }
 
     interface Observer<S, R> {
         void success(S source, R result, long elapsedMs);
@@ -41,6 +36,7 @@ final class BoundedSearchBatch<S, R> {
     private Function<S, Callable<R>> factory;
     private Observer<S, R> observer;
     private long timeoutMs;
+    private CallTimeout parentDeadline;
     private long epoch;
 
     void start(List<S> sources, Function<S, Callable<R>> factory, Observer<S, R> observer, long timeoutMs) {
@@ -49,6 +45,7 @@ final class BoundedSearchBatch<S, R> {
             this.factory = factory;
             this.observer = observer;
             this.timeoutMs = timeoutMs;
+            this.parentDeadline = CallTimeout.current();
             pending = new ArrayList<>(sources).iterator();
             if (pending.hasNext()) READY.add(this);
             while (!READY.isEmpty() && workers < PARALLELISM) {
@@ -84,7 +81,7 @@ final class BoundedSearchBatch<S, R> {
     }
 
     private Runnable take() {
-        Work work = new Work(pending.next(), epoch, factory, observer, timeoutMs);
+        Work work = new Work(pending.next(), epoch, factory, observer, timeoutMs, parentDeadline);
         active.add(work);
         return work;
     }
@@ -96,41 +93,46 @@ final class BoundedSearchBatch<S, R> {
         final Observer<S, R> observer;
         final long timeoutMs;
         Thread thread;
-        ScheduledFuture<?> timeout;
+        final CallTimeout parentDeadline;
+        CallTimeout timeout;
         boolean cancelled;
-        Work(S source, long generation, Function<S, Callable<R>> factory, Observer<S, R> observer, long timeoutMs) {
+        Work(S source, long generation, Function<S, Callable<R>> factory, Observer<S, R> observer, long timeoutMs, CallTimeout parentDeadline) {
             this.source = source;
             this.generation = generation;
             this.factory = factory;
             this.observer = observer;
             this.timeoutMs = timeoutMs;
+            this.parentDeadline = parentDeadline;
         }
 
         void cancel() {
             cancelled = true;
-            if (timeout != null) timeout.cancel(false);
+            if (timeout != null) timeout.close();
             if (thread != null) thread.interrupt();
         }
 
         @Override public void run() {
-            final long started = System.nanoTime();
             synchronized (GATE) {
                 if (cancelled || generation != epoch) { active.remove(this); return; }
                 thread = Thread.currentThread();
-                timeout = TIMER.schedule(() -> {
+                timeout = new CallTimeout(Math.max(1, timeoutMs), parentDeadline, true);
+                timeout.start(() -> {
                     synchronized (GATE) { if (active.contains(this)) cancel(); }
-                }, Math.max(1, timeoutMs), TimeUnit.MILLISECONDS);
+                });
             }
             R result = null;
             Throwable failure = null;
+            Runnable restore = timeout.enter();
             try { result = factory.apply(source).call(); }
-            catch (Throwable error) { failure = error; }
-            long elapsed = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started);
+            catch (Throwable error) { failure = error instanceof Exception exception ? timeout.redactFailure(exception) : error; }
+            finally { restore.run(); }
+            long elapsed = timeout.elapsedMillis();
             boolean deliver;
             synchronized (GATE) {
-                timeout.cancel(false);
-                // Discard late results even if the timer thread was briefly delayed.
-                deliver = !cancelled && generation == epoch && elapsed < timeoutMs;
+                // Discard late computation even if scheduling was delayed; human input is excluded.
+                deliver = !cancelled && generation == epoch && !timeout.isExpired()
+                        && (parentDeadline == null || !parentDeadline.isExpired());
+                timeout.close();
                 active.remove(this);
                 thread = null;
             }
