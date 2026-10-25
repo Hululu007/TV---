@@ -53,6 +53,21 @@ public class PlaybackSessionPlayerAndroidTest {
         });
     }
 
+    @Test public void shouldForwardOrdinaryVodRemovalAndReplacementToTheBackend() {
+        main(() -> {
+            FixturePlayer raw = new FixturePlayer(false);
+            Actions actions = new Actions();
+            PlaybackSessionPlayer player = new PlaybackSessionPlayer(raw, actions);
+            player.replaceMediaItem(0, new MediaItem.Builder().setUri("https://example.com/replaced.mp4").build());
+            assertEquals(1, raw.replacements);
+            player.clearMediaItems();
+            assertEquals(1, raw.removals);
+            assertEquals(0, actions.next + actions.previous + actions.stops);
+            assertNull(actions.items);
+            player.release();
+        });
+    }
+
     @Test public void shouldForwardOrdinaryVodSeekingAndDefaultPosition() {
         main(() -> {
             FixturePlayer raw = new FixturePlayer(false);
@@ -117,6 +132,7 @@ public class PlaybackSessionPlayerAndroidTest {
         int seeks;
         int stops;
         int replacements;
+        int removals;
 
         FixturePlayer(boolean live) {
             super(Looper.getMainLooper());
@@ -146,6 +162,16 @@ public class PlaybackSessionPlayerAndroidTest {
 
         @Override protected ListenableFuture<?> handleSetMediaItems(List<MediaItem> items, int index, long position) {
             replacements++;
+            return Futures.immediateVoidFuture();
+        }
+
+        @Override protected ListenableFuture<?> handleReplaceMediaItems(int from, int to, List<MediaItem> items) {
+            replacements++;
+            return Futures.immediateVoidFuture();
+        }
+
+        @Override protected ListenableFuture<?> handleRemoveMediaItems(int from, int to) {
+            removals++;
             return Futures.immediateVoidFuture();
         }
 

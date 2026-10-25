@@ -14,7 +14,6 @@ import androidx.media3.common.util.Util;
 import com.fongmi.android.tv.bean.Result;
 import com.fongmi.android.tv.bean.Timeshift;
 import com.fongmi.android.tv.player.media.MediaItemFactory;
-import com.fongmi.android.tv.player.media.MediaUrlGuard;
 import com.fongmi.android.tv.player.media.PlaySpec;
 import com.github.catvod.net.OkHttp;
 import com.google.common.util.concurrent.FutureCallback;
@@ -186,8 +185,8 @@ public final class TimeshiftPlayback {
                 if (pending != future) return;
                 try {
                     Result result = Result.fromJson(body);
-                    if (result.hasMsg() || result.needParse() || result.getRealUrl().isEmpty()
-                            || MediaUrlGuard.shouldReject(result.getRealUrl(), result.getFormat())) {
+                    if (result.hasMsg() || result.needParse()
+                            || !TimeshiftSourceValidator.accepts(result.getRealUrl(), result.getFormat(), result.getHeader())) {
                         fail(future);
                         return;
                     }

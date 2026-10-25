@@ -35,9 +35,9 @@
 }
 ```
 
-解析响应中的 `header` 用于新的媒体请求；解析地址本身使用 App 的网络客户端，媒体请求头不会自动转发到解析服务器。需要鉴权的解析地址应使用源提供的授权 URL。响应不应要求再次解析或携带错误 `msg`，最大为 256 KiB；单次解析总超时为 15 秒。
+解析响应中的 `header` 用于新的媒体请求；解析地址本身使用 App 的网络客户端，媒体请求头不会自动转发到解析服务器。需要鉴权的解析地址应使用源提供的授权 URL。响应须提供结构有效的绝对媒体 URI（保留 HTTP(S)、RTSP、RTMP 等媒体协议），不能是相对地址或脚本地址。请求头会按实际 HTTP 客户端的名称/值规则预检；非法 URI、换行请求头或图片结果会在切换前拒绝。响应不应要求再次解析或携带错误 `msg`，最大为 256 KiB；单次解析总超时为 15 秒。
 
-客户端请求解析时继续播放当前流。只有有效响应才替换媒体地址，保留当前暂停状态和播放参数；解析失败时提示错误并保留当前流。后续拖动、切换频道、新的播放请求、取消或播放器释放都会作废此前未完成的解析，晚到的结果不会覆盖当前播放。
+客户端请求解析时继续播放当前流。只有有效响应才替换媒体地址，保留当前暂停状态和播放参数；解析失败时提示错误并保留当前流。后续拖动、切换频道、新的播放请求、取消、MediaController 清空/移除/替换当前媒体或播放器释放都会作废此前未完成的解析，晚到的结果不会覆盖当前播放。
 
 HLS 时间轴提供 Program-Date-Time 时，直播和回看都使用该时间基准；播放列表窗口向前滑动不会让直播进度错误地向后漂移。暂停时播放时间点保持不动，而窗口继续移动。窗口外的旧位置在控件中限制为最早可回看位置。此功能不在本机录制频道；源必须真的提供所声明时间段的内容。
 
@@ -56,7 +56,8 @@ TV 的进度条支持遥控器确认、左右调整及触屏拖动，旁边提�
 ```bash
 ./gradlew :app:testLeanbackArm64_v8aDebugUnitTest \
   --tests 'com.fongmi.android.tv.player.TimeshiftWindowTest' \
-  --tests 'com.fongmi.android.tv.player.TimeshiftRequestTest'
+  --tests 'com.fongmi.android.tv.player.TimeshiftRequestTest' \
+  --tests 'com.fongmi.android.tv.player.TimeshiftSourceValidatorTest'
 ```
 
 Android 测试类：

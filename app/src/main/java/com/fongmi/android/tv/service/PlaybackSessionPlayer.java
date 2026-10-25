@@ -35,6 +35,23 @@ public final class PlaybackSessionPlayer extends ForwardingSimpleBasePlayer {
     }
 
     @Override
+    protected ListenableFuture<?> handleRemoveMediaItems(int fromIndex, int toIndex) {
+        clearTimeshiftIfCurrentChanges(fromIndex, toIndex);
+        return super.handleRemoveMediaItems(fromIndex, toIndex);
+    }
+
+    @Override
+    protected ListenableFuture<?> handleReplaceMediaItems(int fromIndex, int toIndex, List<MediaItem> items) {
+        clearTimeshiftIfCurrentChanges(fromIndex, toIndex);
+        return super.handleReplaceMediaItems(fromIndex, toIndex, items);
+    }
+
+    private void clearTimeshiftIfCurrentChanges(int fromIndex, int toIndex) {
+        int current = getPlayer().getCurrentMediaItemIndex();
+        if (fromIndex <= current && current < toIndex && callback.timeshift() != null) callback.timeshift().clear();
+    }
+
+    @Override
     protected ListenableFuture<?> handleSeek(int mediaItemIndex, long positionMs, int command) {
         // BasePlayer still delivers navigation commands with INDEX_UNSET for a single-item
         // timeline. Those mean another application episode/channel, not a playlist item.

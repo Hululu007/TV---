@@ -159,6 +159,16 @@ public class TimeshiftPlaybackAndroidTest {
         main(() -> assertFalse(host.timeshift.isReplaying()));
     }
 
+    @Test public void shouldAcceptAValidRtspResolverResponse() throws Exception {
+        server.body = "{\"parse\":0,\"url\":\"rtsp://127.0.0.1:8554/replay\"}";
+        seek(20_000).get(5, TimeUnit.SECONDS);
+        main(() -> {
+            assertEquals("rtsp://127.0.0.1:8554/replay", host.source);
+            assertEquals(1, host.applications);
+            assertEquals(0, host.errors);
+        });
+    }
+
     @Test public void shouldKeepTheCurrentStreamOnHttpFailure() throws Exception {
         server.status = NanoHTTPD.Response.Status.SERVICE_UNAVAILABLE;
         seek(20_000).get(5, TimeUnit.SECONDS);
@@ -173,14 +183,16 @@ public class TimeshiftPlaybackAndroidTest {
     @Test public void shouldKeepTheCurrentStreamOnMalformedOrNonDirectResults() throws Exception {
         for (String body : List.of("{broken", "{}", "{\"url\":\"https://example.com/v.m3u8\",\"parse\":1}",
                 "{\"url\":\"https://example.com/poster.jpg\"}", "{\"url\":{},\"header\":42}",
-                "{\"url\":\"https://example.com/v.m3u8\",\"msg\":\"unavailable\"}")) {
+                "{\"url\":\"https://example.com/v.m3u8\",\"msg\":\"unavailable\"}",
+                "{\"url\":\"not-a-media-url\"}", "{\"url\":\"javascript:alert(1)\"}",
+                "{\"url\":\"https://example.com/media\",\"header\":{\"X-Test\":\"a\\nb\"}}")) {
             server.body = body;
             seek(20_000).get(5, TimeUnit.SECONDS);
         }
         main(() -> {
             assertEquals("initial", host.source);
             assertEquals(0, host.applications);
-            assertEquals(6, host.errors);
+            assertEquals(9, host.errors);
         });
     }
 
@@ -195,6 +207,38 @@ public class TimeshiftPlaybackAndroidTest {
         assertTrue(pending.isCancelled());
         main(() -> {
             assertEquals("initial", host.source);
+            assertEquals(0, host.applications);
+            assertEquals(0, host.errors);
+        });
+    }
+
+    @Test public void shouldCancelPendingReplayWhenTheSessionIsCleared() throws Exception {
+        assertSessionMutationCancelsReplay(Player::clearMediaItems);
+        main(() -> assertNull(host.player.getCurrentMediaItem()));
+    }
+
+    @Test public void shouldCancelPendingReplayWhenTheCurrentSessionItemIsRemoved() throws Exception {
+        assertSessionMutationCancelsReplay(player -> player.removeMediaItem(0));
+        main(() -> assertNull(host.player.getCurrentMediaItem()));
+    }
+
+    @Test public void shouldCancelPendingReplayWhenTheCurrentSessionItemIsReplaced() throws Exception {
+        MediaItem next = new MediaItem.Builder().setUri("https://example.com/another.m3u8").build();
+        assertSessionMutationCancelsReplay(player -> player.replaceMediaItem(0, next));
+        main(() -> assertEquals(next, host.player.getCurrentMediaItem()));
+    }
+
+    private void assertSessionMutationCancelsReplay(java.util.function.Consumer<Player> mutation) throws Exception {
+        server.delayFirst = true;
+        ListenableFuture<?> pending = seek(20_000);
+        assertTrue(server.received.await(3, TimeUnit.SECONDS));
+        main(() -> mutation.accept(host.session));
+        server.release.countDown();
+        instrumentation.waitForIdleSync();
+        SystemClock.sleep(100);
+        assertTrue(pending.isCancelled());
+        main(() -> {
+            assertFalse(host.timeshift.isActive());
             assertEquals(0, host.applications);
             assertEquals(0, host.errors);
         });
@@ -332,19 +376,35 @@ public class TimeshiftPlaybackAndroidTest {
     private static final class FixturePlayer extends SimpleBasePlayer {
         long position;
         long windowStartTimeMs = C.TIME_UNSET;
+        MediaItem item = new MediaItem.Builder().setUri("https://example.com/live.m3u8").build();
 
         FixturePlayer() { super(Looper.getMainLooper()); }
         void refresh() { invalidateState(); }
 
         @Override protected State getState() {
+            List<MediaItemData> items = item == null ? List.of() : List.of(new MediaItemData.Builder("fixture-live")
+                    .setMediaItem(item).setDurationUs(C.TIME_UNSET).setIsDynamic(true).setWindowStartTimeMs(windowStartTimeMs).build());
             return new State.Builder().setAvailableCommands(new Player.Commands.Builder().addAll(
                             Player.COMMAND_GET_CURRENT_MEDIA_ITEM, Player.COMMAND_GET_TIMELINE,
-                            Player.COMMAND_PLAY_PAUSE, Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM).build())
-                    .setPlaylist(List.of(new MediaItemData.Builder("fixture-live")
-                            .setMediaItem(new MediaItem.Builder().setUri("https://example.com/live.m3u8").build())
-                            .setDurationUs(C.TIME_UNSET).setIsDynamic(true).setWindowStartTimeMs(windowStartTimeMs).build()))
-                    .setCurrentMediaItemIndex(0).setPlaybackState(Player.STATE_READY)
+                            Player.COMMAND_PLAY_PAUSE, Player.COMMAND_SEEK_IN_CURRENT_MEDIA_ITEM,
+                            Player.COMMAND_CHANGE_MEDIA_ITEMS, Player.COMMAND_RELEASE).build())
+                    .setPlaylist(items).setCurrentMediaItemIndex(item == null ? C.INDEX_UNSET : 0)
+                    .setPlaybackState(item == null ? Player.STATE_IDLE : Player.STATE_READY)
                     .setContentPositionMs(() -> position).build();
+        }
+
+        @Override protected ListenableFuture<?> handleRemoveMediaItems(int from, int to) {
+            if (from == 0 && to > from) item = null;
+            return com.google.common.util.concurrent.Futures.immediateVoidFuture();
+        }
+
+        @Override protected ListenableFuture<?> handleReplaceMediaItems(int from, int to, List<MediaItem> items) {
+            if (from == 0 && to > from) item = items.isEmpty() ? null : items.get(0);
+            return com.google.common.util.concurrent.Futures.immediateVoidFuture();
+        }
+
+        @Override protected ListenableFuture<?> handleRelease() {
+            return com.google.common.util.concurrent.Futures.immediateVoidFuture();
         }
     }
 
