@@ -214,35 +214,40 @@ public class Global {
     }
 
     private Callback getCallback(JSFunction complete, Req req) {
+        Invocation invocation = Invocation.current();
         return new Callback() {
             @Override
             public void onResponse(@NonNull Call call, @NonNull Response res) {
-                completeSuccess(complete, req, res);
+                completeSuccess(complete, req, res, invocation);
             }
 
             @Override
             public void onFailure(@NonNull Call call, @NonNull IOException e) {
-                completeError(complete);
+                completeError(complete, invocation);
             }
         };
     }
 
-    private void completeSuccess(JSFunction complete, Req req, Response res) {
-        boolean posted = submit(() -> {
+    private void completeSuccess(JSFunction complete, Req req, Response res, Invocation invocation) {
+        boolean posted = submit(Invocation.wrap(invocation, () -> {
             try {
                 if (!destroyed) complete.call(Connect.success(ctx, req, res));
                 else res.close();
             } finally {
                 complete.release();
             }
-        });
+        }));
         if (posted) return;
         res.close();
         complete.release();
     }
 
     private void completeError(JSFunction complete) {
-        postCallback(complete, () -> complete.call(Connect.error(ctx)));
+        completeError(complete, Invocation.current());
+    }
+
+    private void completeError(JSFunction complete, Invocation invocation) {
+        postCallback(complete, Invocation.wrap(invocation, () -> complete.call(Connect.error(ctx))));
     }
 
     private boolean postCallback(JSFunction callback, Runnable runnable) {
@@ -290,6 +295,7 @@ public class Global {
     private class Timeout extends TimerTask {
 
         private final JSFunction func;
+        private final Invocation invocation = Invocation.current();
         private final int id;
         private volatile boolean canceled;
         private boolean released;
@@ -301,7 +307,7 @@ public class Global {
 
         @Override
         public void run() {
-            if (submit(this::fire)) return;
+            if (submit(Invocation.wrap(invocation, this::fire))) return;
             Global.this.cancel(id);
         }
 

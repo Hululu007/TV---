@@ -51,6 +51,7 @@ public class JarLoader {
 
     public void clear() {
         for (Spider spider : spiders.values()) {
+            spider.dialog.close();
             try { spider.destroy(); }
             catch (Throwable error) { Log.w("JarLoader", "Source destroy failed", error); }
             finally { SpiderRuntime.close(spider); }

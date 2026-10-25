@@ -7,6 +7,8 @@ import com.fongmi.quickjs.method.Console;
 import com.fongmi.quickjs.method.Global;
 import com.fongmi.quickjs.method.Local;
 import com.fongmi.quickjs.method.NetBridge;
+import com.fongmi.quickjs.method.DialogBridge;
+import com.fongmi.quickjs.method.Invocation;
 import com.fongmi.quickjs.utils.Async;
 import com.fongmi.quickjs.utils.JSUtil;
 import com.fongmi.quickjs.utils.Module;
@@ -28,6 +30,9 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -49,6 +54,8 @@ public class Spider extends com.github.catvod.crawler.Spider {
     private JSObject jsObject;
     private Global global;
     private NetBridge network;
+    private DialogBridge dialogs;
+    private final Set<Invocation> invocations = ConcurrentHashMap.newKeySet();
     private boolean cat;
 
     public Spider(String api, DexClassLoader dex) {
@@ -76,13 +83,28 @@ public class Spider extends com.github.catvod.crawler.Spider {
 
     private Object callResult(String func, boolean json, Object... args) throws Exception {
         long start = System.currentTimeMillis();
+        Invocation invocation = new Invocation();
+        invocations.add(invocation);
+        Future<CompletableFuture<Object>> started = null;
+        CompletableFuture<Object> pending = null;
         try {
-            Object result = submit(() -> json ? Async.runJson(jsObject, func, args) : Async.run(jsObject, func, args)).get().get();
+            started = submit(() -> invocation.call(() -> json ? Async.runJson(jsObject, func, args) : Async.run(jsObject, func, args)));
+            pending = started.get();
+            invocation.bind(pending);
+            Object result = pending.get();
             QuickLog.d(TAG, "call success site=%s func=%s elapsed=%sms result=%s", siteKey, func, System.currentTimeMillis() - start, describe(result));
             return result;
-        } catch (Exception e) {
-            QuickLog.e(TAG, "call failed site=" + siteKey + " func=" + func + " error=" + e.getClass().getSimpleName() + ": " + e.getMessage(), e);
-            throw e;
+        } catch (InterruptedException error) {
+            Thread.currentThread().interrupt();
+            throw error;
+        } catch (Exception error) {
+            QuickLog.e(TAG, "call failed site=" + siteKey + " func=" + func + " error=" + error.getClass().getSimpleName(), error);
+            throw error;
+        } finally {
+            invocation.close();
+            invocations.remove(invocation);
+            if (pending != null && !pending.isDone()) pending.cancel(false);
+            if (started != null && !started.isDone()) started.cancel(false);
         }
     }
 
@@ -170,6 +192,8 @@ public class Spider extends com.github.catvod.crawler.Spider {
 
     @Override
     public void destroy() {
+        for (Invocation invocation : invocations) invocation.close();
+        dialog.close();
         try {
             call("destroy");
         } catch (Throwable e) {
@@ -187,6 +211,7 @@ public class Spider extends com.github.catvod.crawler.Spider {
 
     private void releaseJS() throws Exception {
         submit(() -> {
+            if (dialogs != null) dialogs.close();
             if (network != null) network.close();
             if (global != null) global.destroy();
             if (jsObject != null) jsObject.release();
@@ -200,6 +225,7 @@ public class Spider extends com.github.catvod.crawler.Spider {
             createCtx();
             createFun();
             network = new NetBridge(ctx, executor, net, local, siteKey);
+            dialogs = new DialogBridge(ctx, executor, dialog);
             createObj();
             return null;
         }).get();

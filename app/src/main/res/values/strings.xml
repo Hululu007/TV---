@@ -374,4 +374,14 @@
     <string name="setting_sync_not_configured">未配置</string>
     <string name="setting_sync_configured">已配置</string>
     <string name="setting_sync_last_success">上次同步 %1$s</string>
+
+    <!-- Shared source dialogs -->
+    <string name="spider_dialog_image">Image</string>
+    <string name="spider_dialog_processing">Processing…</string>
+    <string name="spider_dialog_required">Required</string>
+    <string name="spider_dialog_min_choices">Select at least %1$d options</string>
+    <string name="spider_dialog_min_length">Enter at least %1$d characters</string>
+    <string name="spider_dialog_max_choices">Select at most %1$d options</string>
+    <string name="spider_dialog_max_length">Enter at most %1$d characters</string>
+    <string name="spider_dialog_qrcode">Scan QR code</string>
 </resources>
