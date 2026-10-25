@@ -11,6 +11,7 @@ import com.fongmi.android.tv.utils.UrlUtil;
 import com.github.catvod.crawler.Spider;
 import com.github.catvod.crawler.SpiderRuntime;
 import com.github.catvod.crawler.SpiderNull;
+import com.github.catvod.utils.CallTimeout;
 import com.github.catvod.net.OkHttp;
 import com.github.catvod.utils.Path;
 import com.github.catvod.utils.Util;
@@ -188,8 +189,8 @@ public class JarLoader {
                 return spider;
             } catch (Throwable e) {
                 if (spider != null) SpiderRuntime.close(spider);
+                if (runtime.isCanceled() || CallTimeout.currentDeniedDialog() || CallTimeout.currentHasDialog()) return null;
                 e.printStackTrace();
-                if (runtime.isCanceled()) return null;
                 return new SpiderNull();
             }
         });

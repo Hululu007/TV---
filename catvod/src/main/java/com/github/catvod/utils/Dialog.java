@@ -63,6 +63,8 @@ public final class Dialog implements AutoCloseable {
         }
         CompletableFuture<String> source;
         try {
+            CallTimeout.requireDialogsAllowed();
+            CallTimeout.markDialogUse();
             source = Init.dialog(options, onAction);
             if (source == null) throw new IllegalStateException("Dialog host returned no request");
         } catch (RuntimeException error) {

@@ -122,6 +122,10 @@ public final class SpiderDialogTest {
         text("Cancel fixture");
         call.cancel(true);
         absent("Cancel fixture");
+        ListenableFuture<JSONObject> background = Task.submit(() -> owner.show(new JSONObject().put("title", "Background fixture")), 500, false);
+        calls.add(background);
+        assertThrows(ExecutionException.class, () -> background.get(5, TimeUnit.SECONDS));
+        assertFalse(device.hasObject(By.text("Background fixture")));
         Init.setActivity(() -> null);
         assertThrows(ExecutionException.class, () -> SpiderDialog.show("{}").get(5, TimeUnit.SECONDS));
         instrumentation.runOnMainSync(() -> assertThrows(IllegalStateException.class, () -> owner.show(new JSONObject())));
@@ -156,7 +160,7 @@ public final class SpiderDialogTest {
 
     @Test public void quickJsDialogsSurviveAsyncNetworkingAndStayWithTheirCaller() throws Exception {
         boolean logging = QuickLog.isEnabled();
-        QuickLog.putEnabled(false);
+        QuickLog.putEnabled(true);
         Fixture server = new Fixture();
         Spider spider = null;
         try {
@@ -187,11 +191,51 @@ public final class SpiderDialogTest {
             text("JS cancel form");
             cancelled.cancel(true);
             absent("JS cancel form");
+            ListenableFuture<String> background = Task.submit(() -> source.action("cancel"), 700, false);
+            calls.add(background);
+            assertThrows(ExecutionException.class, () -> background.get(5, TimeUnit.SECONDS));
+            assertFalse(device.hasObject(By.text("JS cancel form")));
             ListenableFuture<String> again = Task.submit(() -> source.action("again"), 700);
             calls.add(again);
             text("JS still usable");
             text("Close").click();
             assertEquals("ok", new JSONObject(again.get(5, TimeUnit.SECONDS)).getString("button"));
+            String sentinel = "FORM_PRIVATE_SENTINEL_8642";
+            ListenableFuture<String> secret = Task.submit(() -> source.action("secret"), 700);
+            calls.add(secret);
+            text("Private fixture");
+            field("Password").setText(sentinel);
+            text("Submit private").click();
+            assertEquals(sentinel, new JSONObject(secret.get(5, TimeUnit.SECONDS)).getJSONObject("values").getString("password"));
+            assertFalse("Dialog values leaked into exported JS logs", String.join("\n", QuickLog.getLogs()).contains(sentinel));
+            ListenableFuture<String> secretFailure = Task.submit(() -> source.action("secret-failure"), 700);
+            calls.add(secretFailure);
+            text("Private fixture");
+            field("Password").setText(sentinel);
+            text("Submit private").click();
+            ExecutionException failed = assertThrows(ExecutionException.class, () -> secretFailure.get(5, TimeUnit.SECONDS));
+            java.io.StringWriter trace = new java.io.StringWriter();
+            failed.printStackTrace(new java.io.PrintWriter(trace));
+            assertFalse("Dialog exception leaked through caller", trace.toString().contains(sentinel));
+            assertFalse("Dialog exception leaked into exported JS logs", String.join("\n", QuickLog.getLogs()).contains(sentinel));
+            com.fongmi.android.tv.api.loader.JsLoader cached = new com.fongmi.android.tv.api.loader.JsLoader();
+            String ext = new JSONObject().put("base", base).put("prompt", true).toString();
+            try {
+                ListenableFuture<com.github.catvod.crawler.Spider> coldBackground = Task.submit(() -> cached.getSpider("cold-dialog-fixture", base + "/init-dialog.js", ext, ""), 2000, false);
+                calls.add(coldBackground);
+                assertTrue(coldBackground.get(5, TimeUnit.SECONDS) instanceof com.github.catvod.crawler.SpiderNull);
+                assertFalse(device.hasObject(By.text("Initialization login")));
+                Init.setActivity(() -> null);
+                ListenableFuture<com.github.catvod.crawler.Spider> noActivity = Task.submit(() -> cached.getSpider("cold-dialog-fixture", base + "/init-dialog.js", ext, ""), 2000);
+                calls.add(noActivity);
+                assertTrue(noActivity.get(5, TimeUnit.SECONDS) instanceof com.github.catvod.crawler.SpiderNull);
+                Init.setActivity(() -> activity);
+                ListenableFuture<com.github.catvod.crawler.Spider> coldManual = Task.submit(() -> cached.getSpider("cold-dialog-fixture", base + "/init-dialog.js", ext, ""), 2000);
+                calls.add(coldManual);
+                text("Initialization login");
+                text("Continue initialization").click();
+                assertTrue("Background denial must not cache a failed spider", coldManual.get(5, TimeUnit.SECONDS) instanceof Spider);
+            } finally { cached.clear(); }
         } finally {
             if (spider != null) spider.destroy();
             server.stop();
@@ -272,8 +316,16 @@ public final class SpiderDialogTest {
             export default function() {
               let base;
               return {
-                init(ext) { base = ext.base; }, destroy() {},
+                async init(ext) {
+                  base = ext.base;
+                  if (ext.prompt) await dialog({title:'Initialization login',buttons:[{id:'ok',label:'Continue initialization'}]});
+                }, destroy() {},
                 async action(kind) {
+                  if (kind === 'secret' || kind === 'secret-failure') {
+                    const result = await dialog({title:'Private fixture',inputs:[{name:'password',label:'Password',type:'password'}],buttons:[{id:'ok',label:'Submit private'}]});
+                    if (kind === 'secret-failure') throw new Error(result.values.password);
+                    return result;
+                  }
                   if (kind === 'cancel') return await dialog({title:'JS cancel form'});
                   if (kind === 'again') return await dialog({title:'JS still usable',buttons:[{id:'ok',label:'Close'}]});
                   await net.json(base + '/probe');

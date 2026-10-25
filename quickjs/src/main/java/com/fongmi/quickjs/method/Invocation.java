@@ -20,6 +20,7 @@ public final class Invocation implements AutoCloseable {
     private int depth;
     private int activeActions;
     private boolean closed;
+    private boolean usedDialog;
 
     public static Invocation current() {
         return CURRENT.get();
@@ -68,6 +69,7 @@ public final class Invocation implements AutoCloseable {
     }
 
     public synchronized void await(CompletableFuture<?> future) {
+        usedDialog = true;
         dialogs.add(future);
         future.whenComplete((value, error) -> {
             synchronized (this) {
@@ -78,6 +80,8 @@ public final class Invocation implements AutoCloseable {
         if (closed) future.cancel(true);
         else pause();
     }
+
+    public synchronized boolean hadDialog() { return usedDialog; }
 
     public void bind(CompletableFuture<?> result) {
         result.whenComplete((value, error) -> close());

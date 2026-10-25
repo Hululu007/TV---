@@ -89,6 +89,11 @@ public class BaseLoader {
     }
 
     public Object[] proxy(Map<String, String> params) throws Exception {
+        // Media fetch/proxy workers cannot present login UI over active playback.
+        return com.github.catvod.utils.CallTimeout.withoutDialogs(() -> proxyWithoutDialog(params));
+    }
+
+    private Object[] proxyWithoutDialog(Map<String, String> params) throws Exception {
         if (params.containsKey("siteKey")) return getSpider(params.get("siteKey")).proxy(params);
         if ("js".equals(params.get("do"))) return jsLoader.proxy(params);
         if ("py".equals(params.get("do"))) return pyLoader.proxy(params);

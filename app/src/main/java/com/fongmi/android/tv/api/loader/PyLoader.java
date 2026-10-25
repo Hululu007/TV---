@@ -4,6 +4,7 @@ import com.fongmi.android.tv.App;
 import com.fongmi.chaquo.Loader;
 import com.github.catvod.crawler.Spider;
 import com.github.catvod.crawler.SpiderNull;
+import com.github.catvod.utils.CallTimeout;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -30,17 +31,19 @@ public class PyLoader {
     }
 
     public Spider getSpider(String key, String api, String ext) {
-        return spiders.computeIfAbsent(key, k -> {
+        Spider created = spiders.computeIfAbsent(key, k -> {
             try {
                 Spider spider = loader.spider(api);
                 spider.siteKey = key;
                 spider.init(App.get(), ext);
                 return spider;
             } catch (Throwable e) {
+                if (CallTimeout.currentDeniedDialog() || CallTimeout.currentHasDialog() || Thread.currentThread().isInterrupted()) return null;
                 e.printStackTrace();
                 return new SpiderNull();
             }
         });
+        return created != null ? created : new SpiderNull();
     }
 
     public Object[] proxy(Map<String, String> params) throws Exception {

@@ -92,12 +92,16 @@ public class Spider extends com.github.catvod.crawler.Spider {
             pending = started.get();
             invocation.bind(pending);
             Object result = pending.get();
-            QuickLog.d(TAG, "call success site=%s func=%s elapsed=%sms result=%s", siteKey, func, System.currentTimeMillis() - start, describe(result));
+            QuickLog.d(TAG, "call success site=%s func=%s elapsed=%sms result=%s", siteKey, func, System.currentTimeMillis() - start, invocation.hadDialog() ? "[dialog result omitted]" : describe(result));
             return result;
         } catch (InterruptedException error) {
             Thread.currentThread().interrupt();
             throw error;
         } catch (Exception error) {
+            if (invocation.hadDialog()) {
+                QuickLog.e(TAG, "call failed site=%s func=%s error=%s", siteKey, func, error.getClass().getSimpleName());
+                throw new Exception("Source request failed after dialog");
+            }
             QuickLog.e(TAG, "call failed site=" + siteKey + " func=" + func + " error=" + error.getClass().getSimpleName(), error);
             throw error;
         } finally {

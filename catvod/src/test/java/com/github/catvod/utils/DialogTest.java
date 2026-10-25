@@ -69,4 +69,35 @@ public class DialogTest {
             assertFalse(owner.open("{}", null).isDone());
         }
     }
+    @Test public void backgroundPolicyRejectsHostBeforeShowingAndDoesNotPoisonManualOwner() throws Exception {
+        java.util.concurrent.atomic.AtomicInteger opened = new java.util.concurrent.atomic.AtomicInteger();
+        Init.setDialog((options, callback) -> { opened.incrementAndGet(); return CompletableFuture.completedFuture(null); });
+        try (Dialog owner = new Dialog()) {
+            CallTimeout.withoutDialogs(() -> {
+                assertThrows(ExecutionException.class, () -> owner.open("{}", null).get());
+                assertTrue("Loader must be able to retry a denied cold initialization", CallTimeout.currentDeniedDialog());
+                return null;
+            });
+            assertEquals(0, opened.get());
+            assertFalse(CallTimeout.currentDeniedDialog());
+            assertNull(owner.open("{}", null).get());
+            assertEquals(1, opened.get());
+        }
+    }
+
+    @Test public void dialogMarksItsRequestAndRedactsProviderFailureContent() {
+        Init.setDialog((options, callback) -> CompletableFuture.completedFuture(null));
+        try (CallTimeout timeout = new CallTimeout(1000); Dialog owner = new Dialog()) {
+            Runnable restore = timeout.enter();
+            try {
+                owner.open("{}", null);
+                assertTrue(CallTimeout.currentHasDialog());
+                Exception safe = timeout.redactFailure(new IllegalArgumentException("FORM_SECRET_SENTINEL"));
+                assertFalse(safe.toString().contains("FORM_SECRET_SENTINEL"));
+                assertNull(safe.getCause());
+            } finally { restore.run(); }
+        }
+        assertFalse(CallTimeout.currentHasDialog());
+    }
+
 }

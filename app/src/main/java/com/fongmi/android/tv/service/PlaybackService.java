@@ -453,10 +453,11 @@ public class PlaybackService extends MediaLibraryService implements MediaLibrary
         String sourcePlaybackKey = player.getKey();
         NavigationRequestGate.Request request = navigationGate.begin(sourceMediaId, sourcePlaybackKey);
         Source.ResolveRequest sourceRequest = Source.get().beginResolve();
-        FluentFuture<BrowseTree.NavigationCandidate> task = FluentFuture.from(Task.largeExecutor().submit(() -> {
+        FluentFuture<BrowseTree.NavigationCandidate> task = FluentFuture.from(Task.submitLarge(() -> {
             if (!active || !navigationGate.isCurrent(request)) throw new CancellationException();
             return BrowseTree.navigate(sourceMediaId, delta, sourceRequest);
-        })).withTimeout(Constant.TIMEOUT_VOD, TimeUnit.MILLISECONDS, Task.scheduler());
+        }, Constant.TIMEOUT_VOD));
+        navigationGate.attach(request, task);
         task.addCallback(new FutureCallback<>() {
             @Override
             public void onSuccess(@Nullable BrowseTree.NavigationCandidate candidate) {
@@ -613,7 +614,7 @@ public class PlaybackService extends MediaLibraryService implements MediaLibrary
     public ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> onGetChildren(@NonNull MediaLibrarySession session, @NonNull MediaSession.ControllerInfo browser, @NonNull String parentId, int page, int pageSize, @Nullable MediaLibraryService.LibraryParams params) {
         long browseGeneration = browseGate.snapshot();
         SettableFuture<LibraryResult<ImmutableList<MediaItem>>> future = SettableFuture.create();
-        Task.submit(() -> {
+        ListenableFuture<?> work = Task.submit(() -> {
             try {
                 BrowseTree.ChildrenCandidate candidate = BrowseTree.prepareChildren(parentId, page, pageSize);
                 App.post(() -> {
@@ -626,7 +627,9 @@ public class PlaybackService extends MediaLibraryService implements MediaLibrary
             } catch (Exception error) {
                 future.setException(error);
             }
-        });
+            return null;
+        }, 0, false);
+        future.addListener(() -> { if (future.isCancelled()) work.cancel(true); }, MoreExecutors.directExecutor());
         return future;
     }
 
@@ -634,14 +637,15 @@ public class PlaybackService extends MediaLibraryService implements MediaLibrary
     @Override
     public ListenableFuture<LibraryResult<Void>> onSearch(@NonNull MediaLibrarySession session, @NonNull MediaSession.ControllerInfo browser, @NonNull String query, @Nullable MediaLibraryService.LibraryParams params) {
         long browseGeneration = browseGate.snapshot();
-        Task.execute(() -> {
+        Task.submit(() -> {
             BrowseTree.SearchCandidate candidate = BrowseTree.prepareSearch(query);
             App.post(() -> {
                 if (!active || this.session != session || !browseGate.isCurrent(browseGeneration)) return;
                 candidate.commit();
                 session.notifySearchResultChanged(browser, query, candidate.items().size(), params);
             });
-        });
+            return null;
+        }, 0, false);
         return Futures.immediateFuture(LibraryResult.ofVoid(params));
     }
 
@@ -654,10 +658,10 @@ public class PlaybackService extends MediaLibraryService implements MediaLibrary
     @NonNull
     @Override
     public ListenableFuture<LibraryResult<MediaItem>> onGetItem(@NonNull MediaLibrarySession session, @NonNull MediaSession.ControllerInfo browser, @NonNull String mediaId) {
-        return Task.executor().submit(() -> {
+        return Task.submit(() -> {
             MediaItem item = BrowseTree.getItem(mediaId);
             return item != null ? LibraryResult.ofItem(item, null) : LibraryResult.ofError(SessionError.ERROR_BAD_VALUE);
-        });
+        }, 0, false);
     }
 
     @NonNull
@@ -672,10 +676,11 @@ public class PlaybackService extends MediaLibraryService implements MediaLibrary
         NavigationRequestGate.Request request = mediaResolutionGate.begin(mediaId, playbackKey);
         Source.ResolveRequest sourceRequest = Source.get().beginResolve();
         SettableFuture<MediaSession.MediaItemsWithStartPosition> future = SettableFuture.create();
-        FluentFuture<BrowseTree.ResolutionCandidate> resolutionTask = FluentFuture.from(Task.largeExecutor().submit(() -> {
+        FluentFuture<BrowseTree.ResolutionCandidate> resolutionTask = FluentFuture.from(Task.submitLarge(() -> {
             if (!active || !mediaResolutionGate.isCurrent(request)) throw new CancellationException();
             return requestedItems.isEmpty() ? null : BrowseTree.prepareOrKeep(requestedItems.get(index), sourceRequest);
-        })).withTimeout(Constant.TIMEOUT_VOD, TimeUnit.MILLISECONDS, Task.scheduler());
+        }, Constant.TIMEOUT_VOD));
+        mediaResolutionGate.attach(request, resolutionTask);
         future.addListener(() -> {
             if (!future.isCancelled()) return;
             resolutionTask.cancel(true);

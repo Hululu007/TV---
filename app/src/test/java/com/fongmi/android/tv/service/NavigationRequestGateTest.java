@@ -46,4 +46,21 @@ public class NavigationRequestGateTest {
         gate.invalidate();
         assertFalse(gate.isCurrent(snapshot));
     }
+    @org.junit.Test public void replacingGenerationCancelsAttachedWorkAndRejectsLateAttachment() {
+        NavigationRequestGate gate = new NavigationRequestGate();
+        NavigationRequestGate.Request first = gate.begin("one", "source");
+        java.util.concurrent.CompletableFuture<Void> old = new java.util.concurrent.CompletableFuture<>();
+        gate.attach(first, old);
+        NavigationRequestGate.Request second = gate.begin("two", "source");
+        org.junit.Assert.assertTrue(old.isCancelled());
+        java.util.concurrent.CompletableFuture<Void> current = new java.util.concurrent.CompletableFuture<>();
+        gate.attach(second, current);
+        java.util.concurrent.CompletableFuture<Void> late = new java.util.concurrent.CompletableFuture<>();
+        gate.attach(first, late);
+        org.junit.Assert.assertTrue(late.isCancelled());
+        org.junit.Assert.assertFalse(current.isDone());
+        gate.invalidate();
+        org.junit.Assert.assertTrue(current.isCancelled());
+    }
+
 }

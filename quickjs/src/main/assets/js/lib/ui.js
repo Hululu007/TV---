@@ -7,7 +7,7 @@
         const result = JSON.parse(native.call(method, JSON.stringify(params)));
         if (result.error) throw new Error(result.error);
     }
-    globalThis.dialog = function(options) {
+    const sharedDialog = function(options) {
         if (!options || typeof options !== 'object' || Array.isArray(options)) return Promise.reject(new TypeError('Dialog options must be an object'));
         const {onAction, ...fields} = options;
         if (onAction != null && typeof onAction !== 'function') return Promise.reject(new TypeError('Dialog onAction must be a function'));
@@ -19,6 +19,8 @@
             catch (error) { requests.delete(id); reject(error); }
         });
     };
+    // A legacy JAR may already provide its own dialog API. Preserve that contract.
+    if (typeof globalThis.dialog === 'undefined') globalThis.dialog = sharedDialog;
     globalThis.__SPIDER_DIALOG_DELIVER__ = function(kind, id, payload) {
         if (kind === 'close') {
             closed = true;

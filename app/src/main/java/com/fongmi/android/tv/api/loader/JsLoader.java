@@ -7,6 +7,7 @@ import com.fongmi.quickjs.utils.Module;
 import com.fongmi.quickjs.utils.QuickLog;
 import com.github.catvod.crawler.Spider;
 import com.github.catvod.crawler.SpiderNull;
+import com.github.catvod.utils.CallTimeout;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -43,7 +44,7 @@ public class JsLoader {
             QuickLog.d(TAG, "getSpider cache hit key=%s api=%s", key, api);
             return cached;
         }
-        return spiders.computeIfAbsent(key, k -> {
+        Spider created = spiders.computeIfAbsent(key, k -> {
             long start = System.currentTimeMillis();
             QuickLog.d(TAG, "getSpider start key=%s api=%s ext=%s jar=%s", key, api, preview(ext), preview(jar));
             try {
@@ -53,11 +54,13 @@ public class JsLoader {
                 QuickLog.d(TAG, "getSpider success key=%s elapsed=%sms", key, System.currentTimeMillis() - start);
                 return spider;
             } catch (Throwable e) {
+                if (CallTimeout.currentDeniedDialog() || CallTimeout.currentHasDialog() || Thread.currentThread().isInterrupted()) return null;
                 QuickLog.e(TAG, "getSpider failed key=" + key + " api=" + api + " error=" + e.getClass().getSimpleName() + ": " + e.getMessage(), e);
                 e.printStackTrace();
                 return new SpiderNull();
             }
         });
+        return created != null ? created : new SpiderNull();
     }
 
     public Object[] proxy(Map<String, String> params) throws Exception {

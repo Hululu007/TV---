@@ -15,7 +15,6 @@ import com.google.common.util.concurrent.FluentFuture;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.MoreExecutors;
 
-import java.util.concurrent.TimeUnit;
 
 /** Owns speculative source requests; never touches Source's active extractor session. */
 final class NextEpisodePreloader {
@@ -45,8 +44,9 @@ final class NextEpisodePreloader {
         request = next;
         int ticket = generation;
         long opening = history == null ? 0 : Math.max(0, history.getOpening());
-        future = FluentFuture.from(Task.executor().submit(() -> SiteApi.preloadContent(next.getKey(), next.getFlag(), next.getId())))
-                .withTimeout(Constant.TIMEOUT_VOD, TimeUnit.MILLISECONDS, Task.scheduler());
+        // Speculative work must not interrupt playback with a source login form.
+        future = Task.submit(() -> SiteApi.preloadContent(next.getKey(), next.getFlag(), next.getId()),
+                Constant.TIMEOUT_VOD, false);
         FluentFuture.from(future).addCallback(Task.callback(value -> App.post(() -> {
             if (ticket != generation || host.isHostFinishing()) return;
             if (!PreloadSetting.isNextEpisode() || !host.canPreloadNext() || !isEligible(value)) {

@@ -45,12 +45,31 @@ public class Task {
 
     /** The deadline counts work, but is suspended while a source waits for dialog input. */
     public static <T> ListenableFuture<T> submit(Callable<T> callable, long timeoutMillis) {
+        return submit(executor, callable, timeoutMillis, true);
+    }
+
+    public static <T> ListenableFuture<T> submit(Callable<T> callable, long timeoutMillis, boolean allowDialogs) {
+        return submit(executor, callable, timeoutMillis, allowDialogs);
+    }
+
+    public static <T> ListenableFuture<T> submitLarge(Callable<T> callable, long timeoutMillis) {
+        return submit(largeExecutor, callable, timeoutMillis, true);
+    }
+
+    public static <T> ListenableFuture<T> submitLarge(Callable<T> callable, long timeoutMillis, boolean allowDialogs) {
+        return submit(largeExecutor, callable, timeoutMillis, allowDialogs);
+    }
+
+    private static <T> ListenableFuture<T> submit(ListeningExecutorService pool, Callable<T> callable,
+                                                long timeoutMillis, boolean allowDialogs) {
         SettableFuture<T> result = SettableFuture.create();
-        CallTimeout timeout = new CallTimeout(timeoutMillis);
+        CallTimeout timeout = new CallTimeout(timeoutMillis, allowDialogs);
         ListenableFutureTask<T> task = ListenableFutureTask.create(() -> {
             Runnable restore = timeout.enter();
             try {
                 return callable.call();
+            } catch (Exception failure) {
+                throw timeout.redactFailure(failure);
             } finally {
                 restore.run();
             }
@@ -62,7 +81,7 @@ public class Task {
         Futures.addCallback(task, callback(result::set, result::setException), MoreExecutors.directExecutor());
         timeout.start(() -> result.setException(new TimeoutException("Source request timed out")));
         try {
-            executor.execute(task);
+            pool.execute(task);
         } catch (RejectedExecutionException error) {
             result.setException(error);
         }

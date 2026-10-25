@@ -1,6 +1,7 @@
 package com.fongmi.android.tv.service;
 
 import java.util.Objects;
+import java.util.concurrent.Future;
 
 /** Tracks the latest media-resolution request and whether it is still pending. */
 public final class MediaResolutionRequestGate {
@@ -17,6 +18,11 @@ public final class MediaResolutionRequestGate {
         resolvedMediaId = null;
         pending = true;
         return current;
+    }
+
+    public synchronized void attach(NavigationRequestGate.Request request, Future<?> task) {
+        if (isCurrent(request)) requests.attach(request, task);
+        else task.cancel(true);
     }
 
     public synchronized boolean isCurrent(NavigationRequestGate.Request request) {

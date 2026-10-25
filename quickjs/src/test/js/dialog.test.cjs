@@ -11,6 +11,11 @@ function context() {
 }
 const tick = () => new Promise(resolve => setImmediate(resolve));
 (async () => {
+    const legacy = () => 'legacy dialog';
+    const existing = vm.createContext({dialog: legacy, __SPIDER_DIALOG_NATIVE__: {call: () => '{}'}});
+    vm.runInContext(source, existing);
+    assert.equal(existing.dialog, legacy);
+    assert.equal(existing.dialog(), 'legacy dialog');
     const one = context(), two = context();
     const first = one.dialog({title: 'First'}), independent = two.dialog({title: 'Other'});
     assert.equal(one.calls[0].options.title, 'First');

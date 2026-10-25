@@ -81,4 +81,34 @@ public class CallTimeoutTest {
         resume.run();
         assertFalse(expired.await(150, TimeUnit.MILLISECONDS));
     }
+    @Test public void activeElapsedAndExpiryExcludeSuspendedInputWait() throws Exception {
+        try (CallTimeout timeout = new CallTimeout(150)) {
+            Runnable resume = timeout.suspend();
+            Thread.sleep(220);
+            assertFalse(timeout.isExpired());
+            assertTrue(timeout.elapsedMillis() < 100);
+            resume.run();
+            Thread.sleep(180);
+            assertTrue("Late completion is rejected even without starting the timer", timeout.isExpired());
+            timeout.close();
+            long elapsed = timeout.elapsedMillis();
+            Thread.sleep(30);
+            assertEquals(elapsed, timeout.elapsedMillis());
+        }
+    }
+
+    @Test public void explicitParentCancelsNestedDialogAndRestrictsInteraction() throws Exception {
+        CallTimeout parent = new CallTimeout(0, false);
+        try (CallTimeout child = new CallTimeout(0, parent, true)) {
+            Runnable restore = child.enter();
+            CompletableFuture<String> dialog = new CompletableFuture<>();
+            try {
+                assertThrows(IllegalStateException.class, CallTimeout::requireDialogsAllowed);
+                CallTimeout.trackCurrent(dialog);
+            } finally { restore.run(); }
+            parent.close();
+            assertTrue(dialog.isCancelled());
+        }
+    }
+
 }
