@@ -66,6 +66,8 @@ jobs:
         env:
           MEDIA3_SOURCE_DIR: ${{ github.workspace }}/.media3
         run: ./gradlew -I "$RUNNER_TEMP/tv-sdk-compat.init.gradle" :app:assembleLeanbackArm64_v8aPreview :app:assembleLeanbackArm64_v8aPreviewAndroidTest :app:testLeanbackArm64_v8aPreviewUnitTest -PtvPreview --no-daemon --build-cache --max-workers=2 --console=plain
+      - name: Prepare QuickJS for the x86_64 preview emulator
+        run: python3 .github/scripts/prepare-quickjs-preview.py
       - name: Upload preview APK
         if: always()
         uses: actions/upload-artifact@v4
@@ -88,7 +90,7 @@ jobs:
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -camera-front none
           script: |
             bash .github/scripts/verify-tv-ui.sh
-            bash .github/scripts/verify-upstream-features.sh com.fongmi.android.tv.test.FolderFilterNavigationTest
+            bash .github/scripts/verify-upstream-features.sh com.fongmi.android.tv.test.FolderFilterNavigationTest,com.fongmi.android.tv.test.SpiderDialogTest,com.fongmi.android.tv.player.TimeshiftPlaybackAndroidTest,com.fongmi.android.tv.service.PlaybackSessionPlayerAndroidTest,com.fongmi.android.tv.test.TimeshiftControlsTest,com.fongmi.android.tv.player.TimeshiftExoIntegrationTest
       - name: Upload screenshots and diagnostics
         if: always()
         uses: actions/upload-artifact@v4
