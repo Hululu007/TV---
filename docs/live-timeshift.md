@@ -62,6 +62,7 @@ TV 的进度条支持遥控器确认、左右调整及触屏拖动，旁边提�
 Android 测试类：
 
 - `com.fongmi.android.tv.player.TimeshiftPlaybackAndroidTest`：真实 loopback HTTP、解析失败/取消/过期响应、播放时间锚定、暂停窗口、返回直播、移动窗口边界；使用 Media3 的测试 Player，不依赖解码器 ABI。
+- `com.fongmi.android.tv.player.TimeshiftExoIntegrationTest`：生产 PlayerManager 和 Exo、loopback HTTP 与纯 Java 生成的 12 秒 PCM WAV；验证真实媒体准备、音轨选择、replay/live URL 和请求头、暂停/速度保持以及解析失败保留当前媒体。报告写入 `externalFiles/upstream-verification/timeshift-exo.json`；测试恢复所改偏好，不依赖外部素材或 MPV/FFmpeg 原生解码。
 - `com.fongmi.android.tv.service.PlaybackSessionPlayerAndroidTest`：生产 MediaSession 包装器的普通单项点播/直播业务上一项、下一项、停止、媒体替换和普通 seek 回归。
 - Preview 变体的 `com.fongmi.android.tv.test.TimeshiftControlsTest`：生产 TV Compose 控件的触屏→遥控器切换、返回直播和不支持频道隐藏入口；截图写入 `externalFiles/upstream-verification/timeshift-*.png`。
 
