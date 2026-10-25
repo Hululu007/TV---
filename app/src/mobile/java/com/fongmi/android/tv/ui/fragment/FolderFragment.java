@@ -32,6 +32,7 @@ public class FolderFragment extends BaseFragment {
     private boolean mPendingScrollToTop;
     private final Map<String, Value> mPendingFilters = new LinkedHashMap<>();
     private final FragmentManager.OnBackStackChangedListener mBackStackChangedListener = this::onBackStackChanged;
+    private final Runnable mApplyRootFilters = this::applyRootFilters;
 
     public static FolderFragment newInstance(String key, Class type, int y) {
         Bundle args = new Bundle();
@@ -85,7 +86,9 @@ public class FolderFragment extends BaseFragment {
         TypeFragment child = TypeFragment.newInstance(getKey(), mType.getTypeId(), mType.getStyle(), getExtend(), mType.isFolder(), getY());
         mPendingChild = child;
         mViewReady = true;
-        dispatchPendingCommands();
+        // This is a new root, so its first request can already use queued filter values.
+        // TypeFragment retains these commands until its own view is ready.
+        applyPendingCommands(child);
         getChildFragmentManager().beginTransaction().replace(R.id.container, child).runOnCommit(() -> onChildCommitted(child)).commit();
     }
 
@@ -116,58 +119,43 @@ public class FolderFragment extends BaseFragment {
     }
 
     public void onRefresh() {
-        if (!mViewReady) {
-            mPendingRefresh = true;
-            return;
-        }
-        TypeFragment child = getChild();
-        if (child == null) mPendingRefresh = true;
-        else child.onRefresh();
+        mPendingRefresh = true;
+        dispatchPendingCommands();
     }
 
     public void scrollToTop() {
-        if (!mViewReady) {
-            mPendingScrollToTop = true;
-            return;
-        }
-        TypeFragment child = getChild();
-        if (child == null) mPendingScrollToTop = true;
-        else child.scrollToTop();
+        mPendingScrollToTop = true;
+        dispatchPendingCommands();
     }
 
     public void setFilter(String key, Value value) {
-        if (!mViewReady) {
-            mPendingFilters.put(key, value.copy());
-            mPendingRefresh = false;
-            return;
-        }
-        TypeFragment child = getChild();
-        if (child == null) {
-            mPendingFilters.put(key, value.copy());
-            mPendingRefresh = false;
-        } else child.setFilter(key, value);
+        mPendingFilters.put(key, value.copy());
+        mPendingRefresh = false;
+        dispatchPendingCommands();
     }
 
     public void setFilters(Map<String, Value> filters) {
         if (filters.isEmpty()) return;
-        if (!mViewReady) {
-            for (Map.Entry<String, Value> entry : filters.entrySet()) mPendingFilters.put(entry.getKey(), entry.getValue().copy());
-            mPendingRefresh = false;
-            return;
-        }
-        TypeFragment child = getChild();
-        if (child == null) {
-            for (Map.Entry<String, Value> entry : filters.entrySet()) mPendingFilters.put(entry.getKey(), entry.getValue().copy());
-            mPendingRefresh = false;
-        } else {
-            child.setFilters(filters);
-        }
+        for (Map.Entry<String, Value> entry : filters.entrySet()) mPendingFilters.put(entry.getKey(), entry.getValue().copy());
+        mPendingRefresh = false;
+        dispatchPendingCommands();
     }
 
     private void dispatchPendingCommands() {
-        if (!mViewReady) return;
+        if (!canDispatchPendingCommands()) return;
+        if (!mPendingFilters.isEmpty() && canBack()) {
+            // Wait until the navigation transaction has finished before returning to the
+            // root category. Applying a root filter to the current folder loses its scope.
+            getView().removeCallbacks(mApplyRootFilters);
+            getView().post(mApplyRootFilters);
+            return;
+        }
         TypeFragment child = getChild();
         if (child == null) return;
+        applyPendingCommands(child);
+    }
+
+    private void applyPendingCommands(TypeFragment child) {
         boolean hasFilters = !mPendingFilters.isEmpty();
         if (hasFilters) {
             Map<String, Value> filters = new LinkedHashMap<>(mPendingFilters);
@@ -180,15 +168,27 @@ public class FolderFragment extends BaseFragment {
         mPendingScrollToTop = false;
     }
 
-    private void onChildCommitted(TypeFragment child) {
+    private boolean canDispatchPendingCommands() {
+        return mViewReady && getView() != null && isAdded() && mPendingChild == null && !getChildFragmentManager().isStateSaved();
+    }
+
+    private void applyRootFilters() {
+        if (!canDispatchPendingCommands()) return;
+        if (!mPendingFilters.isEmpty() && canBack()) {
+            getChildFragmentManager().popBackStackImmediate(null, FragmentManager.POP_BACK_STACK_INCLUSIVE);
+        }
         dispatchPendingCommands();
+    }
+
+    private void onChildCommitted(TypeFragment child) {
         if (mPendingChild == child) mPendingChild = null;
+        dispatchPendingCommands();
     }
 
     private void onBackStackChanged() {
         if (mPendingChild != null && !mPendingChild.isAdded()) return;
-        dispatchPendingCommands();
         mPendingChild = null;
+        dispatchPendingCommands();
     }
 
     public boolean canBack() {
@@ -201,7 +201,14 @@ public class FolderFragment extends BaseFragment {
     }
 
     @Override
+    public void onResume() {
+        super.onResume();
+        if (getView() != null) getView().post(mApplyRootFilters);
+    }
+
+    @Override
     public void onDestroyView() {
+        if (getView() != null) getView().removeCallbacks(mApplyRootFilters);
         mViewReady = false;
         getChildFragmentManager().removeOnBackStackChangedListener(mBackStackChangedListener);
         mPendingChild = null;

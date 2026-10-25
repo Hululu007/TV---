@@ -1,6 +1,7 @@
 package com.github.catvod.net;
 
 import com.github.catvod.utils.Json;
+import com.google.gson.JsonArray;
 import com.google.gson.JsonObject;
 
 import org.junit.Test;
@@ -70,6 +71,109 @@ public class NetTest {
         try (Server server = new Server(request -> new Reply(200, "<html>login</html>")); Net net = new Net(new OkHttpClient(), null)) {
             assertEquals("<html>login</html>", net.get(server.url("/")));
             assertThrows(RuntimeException.class, () -> net.json(server.url("/"), "{}"));
+        }
+    }
+
+    @Test
+    public void rawBinaryBodyPreservesEveryByteWithoutCharsetEncoding() throws Exception {
+        byte[] expected = new byte[256];
+        JsonArray body = new JsonArray();
+        for (int i = 0; i < expected.length; i++) {
+            expected[i] = (byte) i;
+            body.add(i);
+        }
+        AtomicReference<Request> seen = new AtomicReference<>();
+        try (Server server = new Server(request -> {
+            seen.set(request);
+            return new Reply(200, request.body);
+        }); Net net = new Net(new OkHttpClient(), null)) {
+            JsonObject options = Json.strict("{\"method\":\"POST\",\"headers\":{\"Content-Type\":\"application/octet-stream; charset=utf-8\"},\"buffer\":3}").getAsJsonObject();
+            options.add("body", body);
+            assertArrayEquals(expected, (byte[]) net.reqParts(server.url("/binary"), options.toString())[1]);
+            assertArrayEquals(expected, seen.get().body);
+            assertEquals("POST", seen.get().method);
+            assertEquals("application/octet-stream; charset=utf-8", seen.get().headers.get("content-type"));
+        }
+    }
+
+    @Test
+    public void rawBinaryBodySupportsEmptyPayloadAndOrderedBatchRequests() throws Exception {
+        AtomicReference<Request> seen = new AtomicReference<>();
+        try (Server server = new Server(request -> {
+            seen.set(request);
+            return new Reply(200, request.body);
+        }); Net net = new Net(new OkHttpClient(), null)) {
+            String options = "{\"method\":\"POST\",\"headers\":{\"Content-Type\":\"application/octet-stream\"},\"body\":[]}";
+            assertFalse(Json.strict(net.req(server.url("/empty"), options)).getAsJsonObject().has("error"));
+            assertArrayEquals(new byte[0], seen.get().body);
+            JsonArray requests = new JsonArray();
+            for (String method : new String[]{"PUT", "PATCH", "DELETE", "OPTIONS"}) {
+                JsonObject item = new JsonObject();
+                item.addProperty("url", server.url("/" + method));
+                JsonObject config = Json.strict(options).getAsJsonObject();
+                config.addProperty("method", method);
+                config.add("body", Json.strict(method.equals("PUT") ? "[0,127,128,255]" : "[42]"));
+                item.add("options", config);
+                requests.add(item);
+            }
+            Net.Result[] results = net.batch(requests.toString(), 2);
+            assertEquals(4, results.length);
+            assertArrayEquals(new byte[]{0, 127, (byte) 128, (byte) 255}, results[0].body);
+            for (int i = 1; i < results.length; i++) assertArrayEquals(new byte[]{42}, results[i].body);
+        }
+    }
+
+    @Test
+    public void invalidRawBodiesFailBeforeAnyNetworkRequest() throws Exception {
+        AtomicInteger requests = new AtomicInteger();
+        try (Server server = new Server(request -> {
+            requests.incrementAndGet();
+            return new Reply(200, "unexpected request");
+        }); Net net = new Net(new OkHttpClient(), null)) {
+            String prefix = "{\"method\":\"POST\",\"headers\":{\"Content-Type\":\"application/octet-stream\"},\"body\":";
+            for (String body : new String[]{"[-1]", "[256]", "[1.5]", "[2147483648]", "[1e100]", "[\"1\"]", "[true]", "[null]", "[[]]", "[{}]", "{}"}) {
+                JsonObject result = Json.strict(net.req(server.url("/"), prefix + body + "}")).getAsJsonObject();
+                assertEquals(body + ": " + result, "IllegalArgumentException: Invalid request options", result.get("error").getAsString());
+            }
+            for (String options : new String[]{
+                    "{\"method\":\"POST\",\"body\":[0]}",
+                    "{\"method\":\"POST\",\"data\":{},\"body\":[0]}",
+                    "{\"method\":\"GET\",\"body\":[0]}",
+                    "{\"method\":\"HEAD\",\"body\":[0]}"}) {
+                JsonObject result = Json.strict(net.req(server.url("/"), options)).getAsJsonObject();
+                assertTrue(options + ": " + result, result.has("error"));
+            }
+            assertEquals(0, requests.get());
+        }
+    }
+
+    @Test
+    public void rawTextKeepsItsCharsetAndNullBodyRemainsAbsent() throws Exception {
+        AtomicReference<Request> seen = new AtomicReference<>();
+        try (Server server = new Server(request -> {
+            seen.set(request);
+            return new Reply(200, "ok");
+        }); Net net = new Net(new OkHttpClient(), null)) {
+            String options = "{\"method\":\"POST\",\"headers\":{\"Content-Type\":\"text/plain; charset=iso-8859-1\"},\"body\":\"é\"}";
+            assertEquals("ok", Json.strict(net.req(server.url("/"), options)).getAsJsonObject().get("content").getAsString());
+            assertArrayEquals(new byte[]{(byte) 233}, seen.get().body);
+            assertEquals("é", NetOptions.from(options).getBody());
+            assertEquals("ok", Json.strict(net.req(server.url("/"), "{\"body\":null}")).getAsJsonObject().get("content").getAsString());
+            assertEquals("GET", seen.get().method);
+            assertNull(NetOptions.from("{\"body\":null}").getBody());
+        }
+    }
+
+    @Test
+    public void rawHttpByteArraysDoNotBecomeWebSocketMessages() throws Exception {
+        AtomicInteger requests = new AtomicInteger();
+        try (Server server = new Server(request -> {
+            requests.incrementAndGet();
+            return new Reply(400, "unexpected handshake");
+        }); Net net = new Net(new OkHttpClient(), null)) {
+            JsonObject result = Json.strict(net.ws(server.url("/").replace("http:", "ws:"), "{\"body\":[0,255],\"timeout\":1000}")).getAsJsonObject();
+            assertEquals("IllegalArgumentException: Invalid request options", result.get("error").getAsString());
+            assertEquals(0, requests.get());
         }
     }
 

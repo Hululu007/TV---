@@ -240,6 +240,22 @@ class SpiderApiTest(unittest.TestCase):
         self.assertEqual(result[1], {"code": 404, "content": "missing"})
         self.assertEqual(self.native.batch_results[0].settings, {"buffer": 3})
 
+    def test_raw_binary_request_bodies_cross_native_bridge_as_unsigned_integers(self):
+        body = list(range(256))
+        options = {"method": "POST", "body": body,
+                   "headers": {"Content-Type": "application/octet-stream"}, "buffer": 3}
+        self.net.req("binary", options)
+        self.assertEqual(self.native.calls[-1], ("req", "binary", options))
+        json_options = dict(options, buffer=0)
+        self.net.json("binary-json", json_options)
+        self.assertEqual(self.native.calls[-1], ("json", "binary-json", json_options))
+        self.native.batch_results = [Result({"code": 200, "content": [-1]})]
+        batch = [{"url": "binary-batch", "options": options}]
+        self.assertEqual(self.net.batch(batch)[0]["content"], b"\xff")
+        self.assertEqual(self.native.calls[-1], ("batch", batch, 4))
+        self.assertEqual(body, list(range(256)))
+        self.assertNotIn("data", options)
+
     def test_cache_callable_round_trip_and_rejects_non_json_values(self):
         value = {"items": [1, False, None], "名称": "缓存"}
         self.assertEqual(self.net.cached("key", {"ttl": 1000}, lambda: value), value)

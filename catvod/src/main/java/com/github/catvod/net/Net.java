@@ -631,10 +631,13 @@ implements AutoCloseable {
     private Request buildRequest(String url, NetOptions options, boolean socket) {
         Headers headers = Headers.of(options.getHeader());
         Request.Builder request = new Request.Builder().url(url).headers(headers);
-        if (options.getData() != null && options.getBody() != null) {
+        if (options.getData() != null && options.getRawBody() != null) {
             throw new IllegalArgumentException("data and body are mutually exclusive");
         }
-        if (!socket) {
+        if (socket) {
+            // WebSocket body remains text; reject HTTP byte arrays before opening a connection.
+            options.getBody();
+        } else {
             String method = this.requestMethod(options);
             request.method(method, this.requestBody(method, options, headers));
         }
@@ -655,7 +658,7 @@ implements AutoCloseable {
     private RequestBody requestBody(String method, NetOptions options, Headers headers) {
         boolean accepts;
         JsonElement data = options.getData();
-        String raw = options.getBody();
+        JsonElement raw = options.getRawBody();
         String postType = options.getPostType();
         if (!POST_TYPES.contains(postType)) {
             throw new IllegalArgumentException("Unsupported postType");
@@ -711,9 +714,9 @@ implements AutoCloseable {
 
     private RequestBody encodeBody(NetOptions options, String contentType) {
         JsonElement data = options.getData();
-        String raw = options.getBody();
+        JsonElement raw = options.getRawBody();
         if (data == null) {
-            return raw != null && contentType != null ? RequestBody.create((String)raw, (MediaType)MediaType.get((String)contentType)) : RequestBody.create((byte[])new byte[0]);
+            return raw == null ? RequestBody.create(new byte[0]) : rawBody(raw, MediaType.get(contentType));
         }
         return switch (options.getPostType()) {
             case "json" -> RequestBody.create((String)data.toString(), (MediaType)MediaType.get((String)"application/json; charset=utf-8"));
@@ -729,6 +732,31 @@ implements AutoCloseable {
             }
             default -> throw new IllegalArgumentException("Unsupported postType");
         };
+    }
+
+    private RequestBody rawBody(JsonElement raw, MediaType type) {
+        if (raw.isJsonPrimitive()) return RequestBody.create(raw.getAsString(), type);
+        if (!raw.isJsonArray()) throw new IllegalArgumentException("Raw body must be text or bytes");
+        JsonArray values = raw.getAsJsonArray();
+        byte[] bytes = new byte[values.size()];
+        for (int i = 0; i < values.size(); i++) bytes[i] = rawByte(values.get(i));
+        return RequestBody.create(bytes, type);
+    }
+
+    private byte rawByte(JsonElement item) {
+        if (!item.isJsonPrimitive() || !item.getAsJsonPrimitive().isNumber()) {
+            throw new IllegalArgumentException("Raw body bytes must be integers from 0 to 255");
+        }
+        int value;
+        try {
+            value = item.getAsBigDecimal().intValueExact();
+        } catch (ArithmeticException | NumberFormatException error) {
+            throw new IllegalArgumentException("Raw body bytes must be integers from 0 to 255", error);
+        }
+        if (value < 0 || value > 255) {
+            throw new IllegalArgumentException("Raw body bytes must be integers from 0 to 255");
+        }
+        return (byte) value;
     }
 
     private Request withCookies(Request request, HttpUrl origin, String explicit, NetOptions options) throws IOException {

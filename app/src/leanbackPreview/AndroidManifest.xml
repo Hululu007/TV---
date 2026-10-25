@@ -9,5 +9,8 @@
         <activity android:name=".ui.activity.TvHomePreviewActivity"
             android:exported="false" android:screenOrientation="landscape"
             android:theme="@style/Theme.App" />
+        <activity android:name=".ui.activity.TvFolderPreviewActivity"
+            android:exported="false" android:screenOrientation="landscape"
+            android:launchMode="singleTask" android:theme="@style/Theme.App" />
     </application>
 </manifest>
