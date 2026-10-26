@@ -53,6 +53,7 @@ public class CastActivity extends PlaybackActivity implements CustomKeyDownVod.L
     private CustomKeyDownVod mKeyDown;
     private String mPlaybackKey;
     private CastAction mAction;
+    private int castToken;
     private Runnable mR1;
     private Runnable mR2;
     private Clock mClock;
@@ -204,6 +205,7 @@ public class CastActivity extends PlaybackActivity implements CustomKeyDownVod.L
     }
 
     private void setAction(Intent intent) {
+        castToken = intent.getIntExtra(DLNARendererService.EXTRA_CAST_TOKEN, castToken);
         mAction = intent.getParcelableExtra(CastAction.KEY_EXTRA);
         if (mAction == null) return;
         mBinding.widget.title.setText(getName());
@@ -748,9 +750,11 @@ public class CastActivity extends PlaybackActivity implements CustomKeyDownVod.L
 
     @Override
     protected void onDestroy() {
+        int token = castToken;
         if (mKeyDown != null) mKeyDown.reset();
         mClock.release();
         releaseRenderer();
+        DLNARendererService.clearCasting(token);
         App.removeCallbacks(mR1, mR2);
         super.onDestroy();
     }
