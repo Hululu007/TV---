@@ -8,6 +8,7 @@ import androidx.media3.common.Player;
 import androidx.media3.exoplayer.ExoPlayer;
 
 import com.fongmi.android.tv.player.engine.PlayerEngine;
+import com.fongmi.android.tv.player.PlaybackSpecs;
 import com.fongmi.android.tv.ai.subtitle.AiSubtitleRuntime;
 import com.fongmi.android.tv.player.media.MediaItemFactory;
 import com.fongmi.android.tv.player.media.PlaySpec;
@@ -46,6 +47,11 @@ public class ExoPlayerEngine implements PlayerEngine {
     @Override
     public Player getPlayer() {
         return player;
+    }
+
+    @Override
+    public PlaybackSpecs getPlaybackSpecs() {
+        return PlaybackSpecs.fromFormats(player.getVideoFormat(), player.getAudioFormat());
     }
 
     @Override

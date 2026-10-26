@@ -115,6 +115,10 @@ public class PlayerManager implements ParseCallback, TimeshiftPlayback.Host {
         return player;
     }
 
+    public PlaybackSpecs getPlaybackSpecs() {
+        return engine == null ? PlaybackSpecs.EMPTY : engine.getPlaybackSpecs();
+    }
+
     public TimeshiftPlayback getTimeshift() {
         return timeshift;
     }

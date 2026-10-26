@@ -31,6 +31,7 @@ import androidx.media3.common.util.Util;
 import com.fongmi.android.tv.App;
 import com.fongmi.android.tv.bean.Sub;
 import com.fongmi.android.tv.cache.CacheLease;
+import com.fongmi.android.tv.player.PlaybackSpecs;
 import com.fongmi.android.tv.player.engine.PlayerEngine;
 import com.fongmi.android.tv.player.media.MediaItemFactory;
 import com.fongmi.android.tv.player.media.PlaySpec;
@@ -996,6 +997,21 @@ final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObserver, 
         }
     }
 
+    PlaybackSpecs getPlaybackSpecs() {
+        if (closed || !fileLoaded) return PlaybackSpecs.EMPTY;
+        Format video = PlaybackSpecs.selectedFormat(tracks, C.TRACK_TYPE_VIDEO);
+        Format audio = PlaybackSpecs.selectedFormat(tracks, C.TRACK_TYPE_AUDIO);
+        String pixelFormat = video == null ? null : propString("video-dec-params/hw-pixelformat", null);
+        if (TextUtils.isEmpty(pixelFormat) || "unknown".equals(pixelFormat)) {
+            pixelFormat = video == null ? null : propString("video-dec-params/pixelformat", null);
+        }
+        // Raw decoder input avoids reporting the display's tone mapping, scaling or audio downmix.
+        return PlaybackSpecs.fromMpv(video, audio,
+                video == null ? null : propString("video-dec-params/gamma", null),
+                pixelFormat,
+                audio == null ? null : propString("audio-params/channels", null));
+    }
+
     private void markRenderedFirstFrame() {
         if (renderedFirstFrame) return;
         if (!fileLoaded) return;
@@ -1068,6 +1084,7 @@ final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObserver, 
         int bitrate = propInt(prefix + "demux-bitrate", C.LENGTH_UNSET);
         if (bitrate > 0) builder.setAverageBitrate(bitrate);
         if (type == C.TRACK_TYPE_VIDEO) {
+            if (propInt(prefix + "dolby-vision-profile", -1) >= 0) builder.setSampleMimeType(MimeTypes.VIDEO_DOLBY_VISION);
             int width = propInt(prefix + "demux-w", C.LENGTH_UNSET);
             int height = propInt(prefix + "demux-h", C.LENGTH_UNSET);
             double frameRate = propDouble(prefix + "demux-fps", 0);

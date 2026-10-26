@@ -37,6 +37,7 @@ import com.fongmi.android.tv.player.PlayerManager;
 import com.fongmi.android.tv.BuildConfig;
 import com.fongmi.android.tv.Constant;
 import com.fongmi.android.tv.R;
+import com.fongmi.android.tv.ui.custom.PlaybackSpecsController;
 import com.fongmi.android.tv.ai.subtitle.AiSubtitlePlaybackUi;
 import com.fongmi.android.tv.ai.skip.AiSkipRuntime;
 import com.fongmi.android.tv.api.DanmakuApi;
@@ -114,6 +115,8 @@ public class VideoActivity extends PlaybackActivity implements VodPlaybackHost, 
     private static final String HERO_TRANSITION = "jetstream_hero";
 
     private ActivityVideoBinding mBinding;
+    private PlaybackSpecsController mSpecs;
+    private String mContentRating = "";
     private ViewGroup.LayoutParams mFrameParams;
     private Observer<Result> mObserveDetail;
     private Observer<Result> mObservePlayer;
@@ -347,6 +350,10 @@ public class VideoActivity extends PlaybackActivity implements VodPlaybackHost, 
     @Override
     protected void initView(Bundle savedInstanceState) {
         super.initView(savedInstanceState);
+        mSpecs = new PlaybackSpecsController(mBinding.playbackSpecs, mBinding.player,
+                () -> isPlaybackReady() && isOwner() ? player() : null,
+                () -> mContentRating,
+                () -> !isJetStreamControlVisible() && !isJetStreamInfoVisible());
         mFrameParams = mBinding.video.getLayoutParams();
         mClock = Clock.create(mBinding.widget.clock);
         mKeyDown = CustomKeyDownVod.create(this);
@@ -482,6 +489,7 @@ public class VideoActivity extends PlaybackActivity implements VodPlaybackHost, 
     }
 
     private void clearDetailState() {
+        mContentRating = "";
         mRatingRequest++;
         MediaRatingHelper.cancel();
         mDetailTitle = getName();
@@ -657,6 +665,8 @@ public class VideoActivity extends PlaybackActivity implements VodPlaybackHost, 
 
     @Override
     public void requestDetail(String key, String id) {
+        mContentRating = "";
+        if (mSpecs != null) mSpecs.dismiss();
         beginPlaybackRequest();
         mViewModel.detailContent(key, id);
     }
@@ -679,6 +689,7 @@ public class VideoActivity extends PlaybackActivity implements VodPlaybackHost, 
 
     @Override
     public void requestPlayer(VodPlayRequest request) {
+        if (mSpecs != null) mSpecs.dismiss();
         beginPlaybackRequest();
         mBinding.widget.title.setText(getString(R.string.detail_title, getVodName(), request.getTitle()));
         mViewModel.playerContent(request.getKey(), request.getFlag(), request.getId());
@@ -697,6 +708,7 @@ public class VideoActivity extends PlaybackActivity implements VodPlaybackHost, 
 
     @Override
     public void prepareSource(Vod item) {
+        if (mSpecs != null) mSpecs.dismiss();
         getIntent().putExtra("key", item.getSiteKey());
         getIntent().putExtra("pic", item.getPic());
         getIntent().putExtra("id", item.getId());
@@ -710,6 +722,7 @@ public class VideoActivity extends PlaybackActivity implements VodPlaybackHost, 
 
     @Override
     public void stopPlaybackForRefresh() {
+        if (mSpecs != null) mSpecs.dismiss();
         player().stop();
         player().clear();
         mClock.setCallback(null);
@@ -729,6 +742,7 @@ public class VideoActivity extends PlaybackActivity implements VodPlaybackHost, 
 
     @Override
     public void startPlayback(Result result, boolean useParse, long startPositionMs, History history, Episode episode) {
+        if (mSpecs != null) mSpecs.begin();
         onSpeedEnd();
         claimLocalPlayback();
         String mediaKey = com.github.catvod.utils.Util.md5(getHistoryKey() + "|" + episode.getUrl() + "|" + episode.getName());
@@ -759,6 +773,8 @@ public class VideoActivity extends PlaybackActivity implements VodPlaybackHost, 
 
     @Override
     public void renderDetail(Vod item, History history) {
+        mContentRating = item.getContentRating();
+        if (mSpecs != null) mSpecs.onMetadataChanged();
         mHistory = history;
         mBinding.progressLayout.showContent();
         updateFullscreenViews();
@@ -1048,6 +1064,7 @@ public class VideoActivity extends PlaybackActivity implements VodPlaybackHost, 
         mBinding.flag.setSelectedPosition(mFlagSelectedPos);
         mKeyDown.setFull(true);
         setFullscreen(true);
+        if (mSpecs != null) mSpecs.setFullscreen(true);
         updateFullscreenViews();
         mFocus2 = null;
     }
@@ -1058,6 +1075,7 @@ public class VideoActivity extends PlaybackActivity implements VodPlaybackHost, 
         mBinding.video.setLayoutParams(mFrameParams);
         mKeyDown.setFull(false);
         setFullscreen(false);
+        if (mSpecs != null) mSpecs.setFullscreen(false);
         updateFullscreenViews();
         applyWindowVideoStyle();
         if (restoreDetailActionFocus) mBinding.detail.restoreActionFocus();
@@ -1320,6 +1338,7 @@ public class VideoActivity extends PlaybackActivity implements VodPlaybackHost, 
     }
 
     private void showError(String text) {
+        if (mSpecs != null) mSpecs.dismiss();
         mBinding.widget.error.setVisibility(View.VISIBLE);
         mBinding.widget.text.setText(text);
         hideProgress();
@@ -1343,6 +1362,7 @@ public class VideoActivity extends PlaybackActivity implements VodPlaybackHost, 
     }
 
     private void showControl(View view) {
+        if (mSpecs != null) mSpecs.dismiss();
         hideInfo();
         mBinding.control.jetstream.setControlsVisible(true);
         syncJetStreamControl();
@@ -1387,6 +1407,7 @@ public class VideoActivity extends PlaybackActivity implements VodPlaybackHost, 
     }
 
     private void showJetStreamInfo(boolean top, boolean center, String action, CharSequence position, CharSequence duration) {
+        if (mSpecs != null) mSpecs.dismiss();
         syncJetStreamControl();
         mBinding.widget.top.setVisibility(View.GONE);
         mBinding.widget.center.setVisibility(View.GONE);
@@ -1912,6 +1933,7 @@ public class VideoActivity extends PlaybackActivity implements VodPlaybackHost, 
     @Override
     protected void onTracksChanged() {
         setTrackVisible();
+        if (mSpecs != null) mSpecs.onMetadataChanged();
     }
 
     @Override
@@ -1921,6 +1943,7 @@ public class VideoActivity extends PlaybackActivity implements VodPlaybackHost, 
 
     @Override
     protected void onError(String msg) {
+        if (mSpecs != null) mSpecs.dismiss();
         mVod.playbackError(msg);
     }
 
@@ -1943,6 +1966,7 @@ public class VideoActivity extends PlaybackActivity implements VodPlaybackHost, 
                 applyWindowVideoStyle();
                 break;
             case Player.STATE_ENDED:
+                if (mSpecs != null) mSpecs.dismiss();
                 hideProgress();
                 mVod.playbackEnded();
                 mClock.setCallback(null);
@@ -1956,7 +1980,9 @@ public class VideoActivity extends PlaybackActivity implements VodPlaybackHost, 
         if (isPlaying) {
             hideCenter();
             if (isJetStreamControlVisible()) hideControl();
-        } else if (isPaused()) {
+            if (mSpecs != null) mSpecs.onMetadataChanged();
+        } else if (isPaused() && !(mSpecs != null && mSpecs.isPending()
+                && isPlaybackReady() && player().getPlayer().getPlayWhenReady())) {
             if (isFullscreen() && !isJetStreamControlVisible()) showInfo();
             else hideInfo();
         }
@@ -1965,6 +1991,7 @@ public class VideoActivity extends PlaybackActivity implements VodPlaybackHost, 
 
     @Override
     protected void onSizeChanged(VideoSize size) {
+        if (mSpecs != null) mSpecs.onMetadataChanged();
         mBinding.widget.size.setText(player().getSizeText());
         updatePausedJetStreamInfo();
     }
@@ -2181,6 +2208,7 @@ public class VideoActivity extends PlaybackActivity implements VodPlaybackHost, 
     @Override
     protected void onStart() {
         super.onStart();
+        if (mSpecs != null) mSpecs.setStarted(true);
         SyncplaySession.get().observe(mSyncplayObserver);
         AiSubtitlePlaybackUi.refresh(mBinding.control.action.aiSubtitle, mBinding.control.action.aiLanguage);
         mClock.stop().start();
@@ -2188,6 +2216,7 @@ public class VideoActivity extends PlaybackActivity implements VodPlaybackHost, 
 
     @Override
     protected void onStop() {
+        if (mSpecs != null) mSpecs.setStarted(false);
         if (mKeyDown != null) mKeyDown.reset();
         SyncplaySession.get().removeObserver(mSyncplayObserver);
         super.onStop();
@@ -2211,6 +2240,7 @@ public class VideoActivity extends PlaybackActivity implements VodPlaybackHost, 
 
     @Override
     protected void onDestroy() {
+        if (mSpecs != null) mSpecs.dismiss();
         SyncplaySession.get().removeObserver(mSyncplayObserver);
         com.fongmi.android.tv.syncplay.SyncplaySession.get().detach(this);
         if (mVod != null) mVod.clearPreload();

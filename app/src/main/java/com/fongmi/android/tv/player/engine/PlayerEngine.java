@@ -4,6 +4,7 @@ import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
 
 import com.fongmi.android.tv.bean.Sub;
+import com.fongmi.android.tv.player.PlaybackSpecs;
 import com.fongmi.android.tv.player.media.PlaySpec;
 
 public interface PlayerEngine {
@@ -14,6 +15,8 @@ public interface PlayerEngine {
     Type getType();
 
     Player getPlayer();
+
+    default PlaybackSpecs getPlaybackSpecs() { return PlaybackSpecs.EMPTY; }
 
     void release();
 
