@@ -8,7 +8,9 @@ import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Path;
 import android.graphics.Rect;
+import android.graphics.drawable.Drawable;
 import android.os.Build;
 import android.os.Handler;
 import android.os.HandlerThread;
@@ -27,6 +29,7 @@ import androidx.test.platform.app.InstrumentationRegistry;
 import androidx.test.uiautomator.UiDevice;
 
 import com.fongmi.android.tv.BuildConfig;
+import com.fongmi.android.tv.R;
 import com.fongmi.android.tv.test.CorePlaybackActivity;
 import com.fongmi.android.tv.test.NativeUiEvidence;
 import com.fongmi.android.tv.ui.custom.JetStreamPlaybackSpecsView;
@@ -208,7 +211,57 @@ public final class PlaybackSpecsCapsuleTest {
         NativeUiEvidence.capture("playback-specs-preview-width");
     }
 
-    @Test public void shouldDrawTheCertificationWhenTheNaturalWidthFits() {
+    @Test public void shouldAssembleBothInternalLogoCornersAndSettleToTheAppMark() {
+        AtomicReference<ValueAnimator> entrance = new AtomicReference<>();
+        main(() -> {
+            capsule.show("2160P HDR10", "HEVC 10bit", "E-AC-3", "5.1", "TV-MA");
+            capsule.post(() -> {
+                ValueAnimator current = currentAnimator();
+                if (current != null) {
+                    current.pause();
+                    current.setCurrentPlayTime(35);
+                    entrance.set(current);
+                }
+            });
+        });
+        await(() -> entrance.get() != null && capsule.getWidth() > 0, 2000, "paused logo assembly");
+        List<Bitmap> assembly = new ArrayList<>();
+        Bitmap settled = null;
+        try {
+            for (long time : new long[]{35, 80, 150}) {
+                main(() -> entrance.get().setCurrentPlayTime(time));
+                assembly.add(normalizedLogo());
+                if (time == 80) NativeUiEvidence.capture("playback-specs-logo-early");
+            }
+            ValueAnimator expansion = finishAndPauseNext(entrance.get(), 520, 20);
+            for (long time : new long[]{20, 70, 150}) {
+                main(() -> expansion.setCurrentPlayTime(time));
+                assembly.add(normalizedLogo());
+                if (time == 70) NativeUiEvidence.capture("playback-specs-logo-mid");
+            }
+            main(expansion::end);
+            settled = normalizedLogo();
+            assertNull("Internal assembly stops for the readable hold", value(this::currentAnimator));
+            for (boolean upper : new boolean[]{true, false}) {
+                float[] target = cornerCenter(settled, upper);
+                assertNotNull("The settled mark keeps both terracotta corners", target);
+                double movement = 0;
+                for (Bitmap frame : assembly) {
+                    float[] center = cornerCenter(frame, upper);
+                    if (center != null) movement = Math.max(movement,
+                            Math.hypot(center[0] - target[0], center[1] - target[1]));
+                }
+                assertTrue("Each terracotta corner must move inside the mark after removing outer motion", movement > 2);
+            }
+            assertMatchesAppLogo(settled);
+            NativeUiEvidence.capture("playback-specs-logo-settled");
+        } finally {
+            for (Bitmap frame : assembly) frame.recycle();
+            if (settled != null) settled.recycle();
+        }
+    }
+
+    @Test public void shouldDrawTheCertificationWithoutAHardOutlineWhenTheNaturalWidthFits() {
         show("2160P HDR10", "HEVC 10bit", "E-AC-3", "5.1", "TV-MA");
         awaitExpanded();
         Bitmap bitmap = pixels();
@@ -217,6 +270,16 @@ public final class PlaybackSpecsCapsuleTest {
             assertTrue("A fitting classification must be drawn, not only announced",
                     containsBrightPixel(bitmap, bitmap.getWidth() - dp(44), dp(15),
                             bitmap.getWidth() - dp(20), dp(32)));
+            // The strip is above the glyphs and clear of the capsule rim. An outlined badge has
+            // a bright ridge here; a softly filled rating stays at or below its interior tone.
+            int center = bitmap.getHeight() / 2;
+            for (int x = bitmap.getWidth() - dp(42); x < bitmap.getWidth() - dp(29); x++) {
+                int inside = brightness(bitmap.getPixel(x, center - dp(7)));
+                for (int y = center - dp(11); y < center - dp(7); y++) {
+                    assertTrue("The rating must not regain a hard rectangular outline",
+                            brightness(bitmap.getPixel(x, y)) <= inside + 16);
+                }
+            }
         } finally {
             bitmap.recycle();
         }
@@ -430,6 +493,94 @@ public final class PlaybackSpecsCapsuleTest {
         return false;
     }
 
+    private int brightness(int color) {
+        return (Color.red(color) + Color.green(color) + Color.blue(color)) / 3;
+    }
+
+    private Bitmap normalizedLogo() {
+        return value(() -> {
+            Bitmap bitmap = Bitmap.createBitmap(160, 160, Bitmap.Config.ARGB_8888);
+            Canvas canvas = new Canvas(bitmap);
+            float center = capsule.getHeight() / 2f;
+            float density = instrumentation.getTargetContext().getResources().getDisplayMetrics().density;
+            float size = (int) Math.min(capsule.getHeight() * 0.68f, 32f * density);
+            float scale = 160f / size / floatField("logoScale");
+            // View.draw excludes the host View's scale. Undo the logo Canvas transform as well,
+            // so a static drawable cannot pass merely by rotating or scaling the complete disc.
+            canvas.translate(80f, 80f);
+            canvas.scale(scale, scale);
+            canvas.rotate(-floatField("logoRotation"));
+            canvas.translate(-center, -center);
+            capsule.draw(canvas);
+            return bitmap;
+        });
+    }
+
+    private float[] cornerCenter(Bitmap bitmap, boolean upper) {
+        int count = 0;
+        long sumX = 0;
+        long sumY = 0;
+        for (int x = upper ? 80 : 0; x < (upper ? 160 : 80); x++) {
+            for (int y = upper ? 0 : 80; y < (upper ? 80 : 160); y++) {
+                int color = bitmap.getPixel(x, y);
+                if (Color.red(color) - Color.green(color) > 45 && Color.red(color) - Color.blue(color) > 55) {
+                    count++;
+                    sumX += x;
+                    sumY += y;
+                }
+            }
+        }
+        return count < 32 ? null : new float[]{sumX / (float) count, sumY / (float) count};
+    }
+
+    private void assertMatchesAppLogo(Bitmap actual) {
+        Bitmap expected = value(() -> {
+            Bitmap bitmap = Bitmap.createBitmap(160, 160, Bitmap.Config.ARGB_8888);
+            Canvas canvas = new Canvas(bitmap);
+            Path circle = new Path();
+            circle.addCircle(80f, 80f, 80f, Path.Direction.CW);
+            canvas.clipPath(circle);
+            Drawable drawable = activity.getDrawable(R.drawable.ic_logo);
+            assertNotNull(drawable);
+            drawable.setBounds(0, 0, 160, 160);
+            drawable.draw(canvas);
+            return bitmap;
+        });
+        try {
+            int checked = 0;
+            int different = 0;
+            for (int x = 2; x < 158; x++) {
+                for (int y = 2; y < 158; y++) {
+                    if (Math.hypot(x - 80, y - 80) > 76) continue;
+                    int color = expected.getPixel(x, y);
+                    // Ignore antialiasing at path edges; compare the original solid geometry.
+                    if (color != expected.getPixel(x - 1, y) || color != expected.getPixel(x + 1, y)
+                            || color != expected.getPixel(x, y - 1) || color != expected.getPixel(x, y + 1)) continue;
+                    checked++;
+                    int rendered = actual.getPixel(x, y);
+                    if (Math.abs(Color.red(color) - Color.red(rendered)) > 8
+                            || Math.abs(Color.green(color) - Color.green(rendered)) > 8
+                            || Math.abs(Color.blue(color) - Color.blue(rendered)) > 8) different++;
+                }
+            }
+            assertTrue("Compare the complete disc, monogram, counter, and corners", checked > 15000);
+            assertTrue("The settled animation must retain ic_logo geometry and colors: " + different + "/" + checked,
+                    different < checked / 100);
+        } finally {
+            expected.recycle();
+        }
+    }
+
+    private float floatField(String name) {
+        try {
+            Field field = JetStreamPlaybackSpecsView.class.getDeclaredField(name);
+            field.setAccessible(true);
+            return field.getFloat(capsule);
+        } catch (ReflectiveOperationException error) {
+            throw new AssertionError(error);
+        }
+    }
+
     private Bitmap pixels() {
         return value(() -> {
             Bitmap bitmap = Bitmap.createBitmap(capsule.getWidth(), capsule.getHeight(), Bitmap.Config.ARGB_8888);
@@ -438,7 +589,7 @@ public final class PlaybackSpecsCapsuleTest {
         });
     }
 
-    // Access only the platform animator to freeze short phases for pixel assertions and screenshots.
+    // Freeze short platform-animation phases for pixel assertions and screenshots.
     private ValueAnimator currentAnimator() {
         try {
             Field field = JetStreamPlaybackSpecsView.class.getDeclaredField("animator");

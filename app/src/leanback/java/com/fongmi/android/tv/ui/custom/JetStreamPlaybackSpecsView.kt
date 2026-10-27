@@ -22,8 +22,7 @@ import android.util.AttributeSet
 import android.view.View
 import android.view.animation.OvershootInterpolator
 import android.view.animation.PathInterpolator
-import androidx.appcompat.content.res.AppCompatResources
-import com.fongmi.android.tv.R
+import androidx.core.graphics.PathParser
 import kotlin.math.ceil
 import kotlin.math.max
 import kotlin.math.min
@@ -61,8 +60,7 @@ class JetStreamPlaybackSpecsView @JvmOverloads constructor(
         strokeWidth = 0.75f * density
     }
     private val ratingPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeWidth = 0.75f * density
+        color = 0x18FFFFFF
     }
     private val primaryPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
         textSize = 14f * textDensity
@@ -79,7 +77,15 @@ class JetStreamPlaybackSpecsView @JvmOverloads constructor(
         color = 0xFFE2E2E7.toInt()
         typeface = Typeface.create(jetStreamTypeface(context), Typeface.BOLD)
     }
-    private val logo = AppCompatResources.getDrawable(context, R.drawable.ic_logo)?.mutate()
+    // Match ic_logo's vector geometry at rest, with independent, cached pieces for assembly.
+    private val logoPaperPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFF3EFE7.toInt() }
+    private val logoBodyPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFF24221F.toInt() }
+    private val logoFoldPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFC75B3F.toInt() }
+    private val logoBody = PathParser.createPathFromPathData("M31,27h68l30,30v76H61l-30,-30V27Z")!!
+    private val logoCounter = PathParser.createPathFromPathData("M54,51h34l18,18v40H72L54,91V51Z")!!
+    private val logoUpperFold = PathParser.createPathFromPathData("M99,27h30v30L99,27Z")!!
+    private val logoLowerFold = PathParser.createPathFromPathData("M31,103h30v30l-30,-30Z")!!
+    private var logoSize = 0f
     private val pill = RectF()
     private val fullBounds = RectF()
     private val ratingBounds = RectF()
@@ -108,6 +114,7 @@ class JetStreamPlaybackSpecsView @JvmOverloads constructor(
     private var contentOffset = 0f
     private var logoScale = 1f
     private var logoRotation = 0f
+    private var logoAssembly = 0f
     private var active = false
     private var animator: ValueAnimator? = null
     private val enter = Runnable { enter() }
@@ -135,6 +142,7 @@ class JetStreamPlaybackSpecsView @JvmOverloads constructor(
         textOpacity = 0f
         logoScale = 0.7f
         logoRotation = -14f
+        logoAssembly = 0f
         alpha = 0f
         visibility = VISIBLE
         requestLayout()
@@ -179,6 +187,7 @@ class JetStreamPlaybackSpecsView @JvmOverloads constructor(
         bodyPaint.color = 0xD51B1B1D.toInt()
         expansion = 0f
         textOpacity = 0f
+        logoAssembly = 0f
         alpha = 0f
         scaleX = 1f
         scaleY = 1f
@@ -256,7 +265,7 @@ class JetStreamPlaybackSpecsView @JvmOverloads constructor(
         pivotX = h / 2f
         pivotY = h / 2f
         val size = min(h * 0.68f, 32f * density).toInt()
-        logo?.setBounds(0, 0, size, size)
+        logoSize = size.toFloat()
         logoClip.reset()
         logoClip.addCircle(size / 2f, size / 2f, size / 2f, Path.Direction.CW)
     }
@@ -283,15 +292,51 @@ class JetStreamPlaybackSpecsView @JvmOverloads constructor(
     }
 
     private fun drawLogo(canvas: Canvas, center: Float) {
-        val drawable = logo ?: return
-        val size = drawable.bounds.width().toFloat()
+        val size = logoSize
+        if (size <= 0f) return
         val save = canvas.save()
         canvas.translate(center, center)
         canvas.rotate(logoRotation)
         canvas.scale(logoScale, logoScale)
         canvas.translate(-size / 2f, -size / 2f)
         canvas.clipPath(logoClip)
-        drawable.draw(canvas)
+        canvas.scale(size / 160f, size / 160f)
+        canvas.drawRect(0f, 0f, 160f, 160f, logoPaperPaint)
+        canvas.translate(6.4f, 6.4f)
+        canvas.scale(0.92f, 0.92f)
+
+        val bodyProgress = ease.getInterpolation(logoPhase(0f, 0.58f))
+        val counterProgress = ease.getInterpolation(logoPhase(0.08f, 0.66f))
+        val bodySave = canvas.save()
+        canvas.translate(0f, 12f * (1f - bodyProgress))
+        canvas.rotate(-10f * (1f - bodyProgress), 80f, 80f)
+        val bodyScale = 0.78f + 0.22f * bodyProgress
+        canvas.scale(bodyScale, bodyScale, 80f, 80f)
+        canvas.drawPath(logoBody, logoBodyPaint)
+        val counterSave = canvas.save()
+        val counterScale = 0.55f + 0.45f * counterProgress
+        canvas.scale(counterScale, counterScale, 80f, 80f)
+        canvas.rotate(12f * (1f - counterProgress), 80f, 80f)
+        canvas.drawPath(logoCounter, logoPaperPaint)
+        canvas.restoreToCount(counterSave)
+        canvas.restoreToCount(bodySave)
+        drawLogoFold(canvas, logoUpperFold, logoPhase(0.12f, 0.8f), 114f, 42f, 1f)
+        drawLogoFold(canvas, logoLowerFold, logoPhase(0.24f, 1f), 46f, 118f, -1f)
+        canvas.restoreToCount(save)
+    }
+
+    private fun logoPhase(start: Float, end: Float): Float =
+        ((logoAssembly - start) / (end - start)).coerceIn(0f, 1f)
+
+    private fun drawLogoFold(canvas: Canvas, path: Path, progress: Float,
+                             pivotX: Float, pivotY: Float, direction: Float) {
+        val eased = logoSpring.getInterpolation(progress)
+        val save = canvas.save()
+        canvas.translate(22f * direction * (1f - eased), -22f * direction * (1f - eased))
+        canvas.rotate(28f * direction * (1f - eased), pivotX, pivotY)
+        val scale = 0.72f + 0.28f * eased
+        canvas.scale(scale, scale, pivotX, pivotY)
+        canvas.drawPath(path, logoFoldPaint)
         canvas.restoreToCount(save)
     }
 
@@ -317,11 +362,11 @@ class JetStreamPlaybackSpecsView @JvmOverloads constructor(
                 center, primaryBaseline, secondaryBaseline)
         }
         if (visibleRating) {
-            ratingPaint.color = Color.argb((68 * textOpacity).toInt(), 255, 255, 255)
+            ratingPaint.alpha = (24 * textOpacity).toInt()
             ratingTextPaint.alpha = (225 * textOpacity).toInt()
             ratingBounds.set(ratingStart, center - 10f * density,
                 ratingStart + naturalRatingWidth, center + 10f * density)
-            canvas.drawRoundRect(ratingBounds, 4f * density, 4f * density, ratingPaint)
+            canvas.drawRoundRect(ratingBounds, 10f * density, 10f * density, ratingPaint)
             val baseline = center - (ratingTextPaint.ascent() + ratingTextPaint.descent()) / 2f
             canvas.drawText(displayRating, ratingStart + 6f * density, baseline, ratingTextPaint)
         }
@@ -352,6 +397,7 @@ class JetStreamPlaybackSpecsView @JvmOverloads constructor(
             textOpacity = 1f
             logoScale = 1f
             logoRotation = 0f
+            logoAssembly = 1f
             contentOffset = 0f
             invalidate()
             postDelayed(holdFinished, HOLD_MILLIS)
@@ -364,6 +410,7 @@ class JetStreamPlaybackSpecsView @JvmOverloads constructor(
             scaleY = scaleX
             logoScale = 0.7f + 0.3f * spring
             logoRotation = -14f * (1f - ease.getInterpolation(progress))
+            logoAssembly = 0.3f * progress
         }) {
             scaleX = 1f
             scaleY = 1f
@@ -374,8 +421,10 @@ class JetStreamPlaybackSpecsView @JvmOverloads constructor(
                 contentOffset = -6f * density * (1f - textOpacity)
                 // One restrained settle while the specifications arrive, never an idle spinner.
                 logoScale = 1f + 0.065f * kotlin.math.sin(progress * Math.PI).toFloat()
+                logoAssembly = 0.3f + 0.7f * progress
             }) {
                 logoScale = 1f
+                logoAssembly = 1f
                 postDelayed(holdFinished, HOLD_MILLIS)
             }
         }
@@ -388,13 +437,17 @@ class JetStreamPlaybackSpecsView @JvmOverloads constructor(
             return
         }
         animatePhase(150, { progress -> textOpacity = 1f - progress }) {
-            animatePhase(380, { progress -> expansion = 1f - ease.getInterpolation(progress) }) {
+            animatePhase(380, { progress ->
+                expansion = 1f - ease.getInterpolation(progress)
+                logoAssembly = 1f - 0.55f * ease.getInterpolation(progress)
+            }) {
                 animatePhase(180, { progress ->
                     alpha = 1f - progress
                     val scale = 1f - 0.3f * ease.getInterpolation(progress)
                     scaleX = scale
                     scaleY = scale
                     logoScale = scale
+                    logoAssembly = 0.45f * (1f - progress)
                 }) { dismiss() }
             }
         }
