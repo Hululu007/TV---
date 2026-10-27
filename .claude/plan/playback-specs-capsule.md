@@ -53,4 +53,13 @@
 - [x] `Vod` 显式分级元数据已接通 JSON 别名 / XML / Parcel；新增别名、空值、错误类型、评分不推断与 Parcel 往返测试，待 CI 执行。
 - [x] 规格模型、原生 View 与背景采样实现完成。
 - [x] 点播/直播接入及生命周期清理完成。
-- [ ] 编译、重点测试、截图/动效证据和最终审查完成。
+- [x] 编译、重点测试、截图/动效证据和最终审查完成。
+
+## 验证结果（2026-10-27）
+
+- 最终实现提交：`39dc707cb32a71563ea08debe194c3df14ae3f10`。
+- 构建验证：https://github.com/wobuhui666/TV/actions/runs/40425008488 ，成功；688 app + 210 catvod + 16 quickjs = 914 项 JUnit，零失败、错误或跳过；mobile 编译及 TV APK 构建通过。
+- UI 验证：https://github.com/wobuhui666/TV/actions/runs/40425005727 ，成功；新增 17 项 Android 测试，录屏另执行自然动效测试 1 次；原有 33 项功能测试及外观综合测试通过。
+- 已检查 10 张胶囊阶段/布局/模糊截图和自然动效录屏。真实 SurfaceView、TextureView 采样及 Exo 本地 PCM 播放经过验证。
+- 录屏期间软件 GPU 模拟器的 Window.FrameMetrics p50=50.13ms、p95=866.78ms，48 帧中47帧超过16.7ms；首轮未录屏为 p50=31.01ms、p95=50.57ms。数据只反映模拟器与录屏负载，不能宣称60fps或ARM实机流畅度已通过。
+- 原生 MPV 实机性能、API24/25实机采样路径未执行；保留静态兼容和降级保护。
