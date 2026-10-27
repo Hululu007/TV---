@@ -21,6 +21,16 @@
             android:layout_height="match_parent"
             app:surface_type="none" />
 
+        <com.fongmi.android.tv.ui.custom.JetStreamPlaybackSpecsView
+            android:id="@+id/playbackSpecs"
+            android:layout_width="wrap_content"
+            android:layout_height="46dp"
+            android:layout_gravity="top|left"
+            android:layout_marginLeft="48dp"
+            android:layout_marginTop="28dp"
+            android:layout_marginRight="48dp"
+            android:visibility="gone" />
+
         <include
             android:id="@+id/widget"
             layout="@layout/view_widget_live"

@@ -27,6 +27,7 @@ import com.bumptech.glide.request.transition.Transition;
 import com.fongmi.android.tv.App;
 import com.fongmi.android.tv.Constant;
 import com.fongmi.android.tv.R;
+import com.fongmi.android.tv.ui.custom.PlaybackSpecsController;
 import com.fongmi.android.tv.ai.subtitle.AiSubtitlePlaybackUi;
 import com.fongmi.android.tv.api.config.LiveConfig;
 import com.fongmi.android.tv.bean.Channel;
@@ -85,6 +86,7 @@ import java.util.List;
 public class LiveActivity extends PlaybackActivity implements GroupAdapter.OnClickListener, ChannelAdapter.OnClickListener, EpgDataAdapter.OnClickListener, CustomKeyDownLive.Listener, CustomLiveListView.Callback, TrackDialog.Listener, PassListener, ConfigListener, LiveListener, LivePlaybackHost {
 
     private ActivityLiveBinding mBinding;
+    private PlaybackSpecsController mSpecs;
     private ChannelAdapter mChannelAdapter;
     private EpgDataAdapter mEpgDataAdapter;
     private GroupAdapter mGroupAdapter;
@@ -176,6 +178,10 @@ public class LiveActivity extends PlaybackActivity implements GroupAdapter.OnCli
     @Override
     protected void initView(Bundle savedInstanceState) {
         super.initView(savedInstanceState);
+        mSpecs = new PlaybackSpecsController(mBinding.playbackSpecs, mBinding.player,
+                () -> isPlaybackReady() && isOwner() ? player() : null,
+                () -> "",
+                () -> !isJetStreamControlVisible() && !isJetStreamInfoVisible() && !isVisible(mBinding.recycler));
         mClock = Clock.create(mBinding.widget.clock);
         mKeyDown = CustomKeyDownLive.create(this);
         mObserveUrl = this::onUrlObserved;
@@ -545,9 +551,11 @@ public class LiveActivity extends PlaybackActivity implements GroupAdapter.OnCli
         JetStreamAnimator.hide(mBinding.recycler, -18, 0, View.GONE, JetStreamAnimator.PANEL_DURATION);
         setPosition();
         requestFocusLater(mBinding.video);
+        if (mSpecs != null) mSpecs.onMetadataChanged();
     }
 
     private void showUI() {
+        if (mSpecs != null) mSpecs.dismiss();
         if (isVisible(mBinding.recycler) || mGroupAdapter.getItemCount() == 0) return;
         JetStreamAnimator.show(mBinding.recycler, -18, 0, JetStreamAnimator.PANEL_DURATION);
         setPosition();
@@ -586,10 +594,12 @@ public class LiveActivity extends PlaybackActivity implements GroupAdapter.OnCli
     @Override
     protected void onTracksChanged() {
         setTrackVisible();
+        if (mSpecs != null) mSpecs.onMetadataChanged();
     }
 
     @Override
     protected void onError(String msg) {
+        if (mSpecs != null) mSpecs.dismiss();
         mLive.playbackError(msg);
     }
 
@@ -609,6 +619,7 @@ public class LiveActivity extends PlaybackActivity implements GroupAdapter.OnCli
                 player().reset();
                 break;
             case Player.STATE_ENDED:
+                if (mSpecs != null) mSpecs.dismiss();
                 mLive.playbackEnded();
                 updatePlayControl(false);
                 break;
@@ -619,6 +630,10 @@ public class LiveActivity extends PlaybackActivity implements GroupAdapter.OnCli
     protected void onPlayingChanged(boolean isPlaying) {
         if (isPlaying || isPaused()) updatePlayControl(isPlaying);
         if (isPlaying && isJetStreamControlVisible()) hideControl();
+        if (isPlaying && mSpecs != null) {
+            if (mSpecs.isPending()) hideInfo();
+            mSpecs.onMetadataChanged();
+        }
         syncJetStreamControl();
     }
 
@@ -628,6 +643,7 @@ public class LiveActivity extends PlaybackActivity implements GroupAdapter.OnCli
 
     @Override
     protected void onSizeChanged(VideoSize size) {
+        if (mSpecs != null) mSpecs.onMetadataChanged();
         mBinding.widget.size.setText(player().getSizeText());
         syncJetStreamControl();
     }
@@ -671,6 +687,7 @@ public class LiveActivity extends PlaybackActivity implements GroupAdapter.OnCli
     }
 
     private void showError(String text) {
+        if (mSpecs != null) mSpecs.dismiss();
         mBinding.widget.error.setVisibility(View.VISIBLE);
         mBinding.widget.text.setText(text);
         hideProgress();
@@ -682,6 +699,7 @@ public class LiveActivity extends PlaybackActivity implements GroupAdapter.OnCli
     }
 
     private void showControl(View view) {
+        if (mSpecs != null) mSpecs.dismiss();
         hideInfo();
         syncJetStreamControl();
         mBinding.control.jetstream.setControlsVisible(true);
@@ -731,6 +749,7 @@ public class LiveActivity extends PlaybackActivity implements GroupAdapter.OnCli
     }
 
     private void showJetStreamInfo(boolean top, boolean center, String action, CharSequence position, CharSequence duration) {
+        if (mSpecs != null) mSpecs.dismiss();
         syncJetStreamControl();
         mBinding.widget.top.setVisibility(View.GONE);
         mBinding.widget.center.setVisibility(View.GONE);
@@ -916,11 +935,13 @@ public class LiveActivity extends PlaybackActivity implements GroupAdapter.OnCli
     }
 
     private void start(Result result, long startPositionMs) {
+        if (mSpecs != null) mSpecs.begin();
         mPlaybackKey = result.getRealUrl();
         startPlayer(mPlaybackKey, result, false, getHome().getTimeout(), startPositionMs, buildMetadata());
     }
 
     private void stopPlayer() {
+        if (mSpecs != null) mSpecs.dismiss();
         player().clear();
         player().stop();
     }
@@ -1076,6 +1097,7 @@ public class LiveActivity extends PlaybackActivity implements GroupAdapter.OnCli
 
     @Override
     public void setLive(Live item) {
+        if (mSpecs != null) mSpecs.dismiss();
         if (item.isSelected()) item.getGroups().clear();
         LiveConfig.get().setHome(item);
         player().reset();
@@ -1352,12 +1374,14 @@ public class LiveActivity extends PlaybackActivity implements GroupAdapter.OnCli
     @Override
     protected void onStart() {
         super.onStart();
+        if (mSpecs != null) mSpecs.setStarted(true);
         AiSubtitlePlaybackUi.refresh(mBinding.control.action.aiSubtitle, mBinding.control.action.aiLanguage);
         mClock.stop().start();
     }
 
     @Override
     protected void onStop() {
+        if (mSpecs != null) mSpecs.setStarted(false);
         super.onStop();
         if (PlayerSetting.isBackgroundOff()) mClock.stop();
     }
@@ -1378,6 +1402,7 @@ public class LiveActivity extends PlaybackActivity implements GroupAdapter.OnCli
 
     @Override
     protected void onDestroy() {
+        if (mSpecs != null) mSpecs.dismiss();
         mClock.release();
         Source.get().exit();
         App.removeCallbacks(mR0, mR1, mR2, mR3, mR4, mSeekRunnable);

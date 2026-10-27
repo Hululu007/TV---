@@ -16,6 +16,10 @@ import com.fongmi.android.tv.utils.Sniffer;
 import com.fongmi.android.tv.utils.ResUtil;
 import com.fongmi.android.tv.utils.Util;
 import com.github.catvod.utils.Trans;
+import com.google.gson.JsonDeserializationContext;
+import com.google.gson.JsonDeserializer;
+import com.google.gson.JsonElement;
+import com.google.gson.annotations.JsonAdapter;
 import com.google.gson.annotations.SerializedName;
 import com.google.gson.reflect.TypeToken;
 
@@ -74,6 +78,10 @@ public class Vod implements Parcelable, Diffable<Vod> {
     @Element(name = "des", required = false)
     @SerializedName("vod_content")
     private String vodContent;
+    @Element(name = "certification", required = false)
+    @SerializedName(value = "vod_certification", alternate = {"content_rating", "age_rating"})
+    @JsonAdapter(ContentRatingAdapter.class)
+    private String contentRating;
     private String backdrop;
     /** Rex 卡片副题用的流派串（最多 2 个中文流派，可为空）。 */
     private String genreText;
@@ -115,6 +123,7 @@ public class Vod implements Parcelable, Diffable<Vod> {
         this.vodDirector = in.readString();
         this.vodActor = in.readString();
         this.vodContent = in.readString();
+        this.contentRating = in.readString();
         this.backdrop = in.readString();
         this.genreText = in.readString();
         this.vodPlayFrom = in.readString();
@@ -222,6 +231,15 @@ public class Vod implements Parcelable, Diffable<Vod> {
 
     public void setContent(String vodContent) {
         this.vodContent = vodContent;
+    }
+
+    /** Only an explicitly supplied content certification; never a review score. */
+    public String getContentRating() {
+        return contentRating == null ? "" : contentRating.trim();
+    }
+
+    public void setContentRating(String contentRating) {
+        this.contentRating = contentRating;
     }
 
     public String getBackdrop() {
@@ -432,6 +450,7 @@ public class Vod implements Parcelable, Diffable<Vod> {
         dest.writeString(this.vodDirector);
         dest.writeString(this.vodActor);
         dest.writeString(this.vodContent);
+        dest.writeString(this.contentRating);
         dest.writeString(this.backdrop);
         dest.writeString(this.genreText);
         dest.writeString(this.vodPlayFrom);
@@ -476,4 +495,13 @@ public class Vod implements Parcelable, Diffable<Vod> {
             return new Vod[size];
         }
     };
+
+    /** Malformed optional metadata must not prevent loading the rest of the title. */
+    public static final class ContentRatingAdapter implements JsonDeserializer<String> {
+        @Override
+        public String deserialize(JsonElement json, Type type, JsonDeserializationContext context) {
+            return json.isJsonPrimitive() && json.getAsJsonPrimitive().isString()
+                    ? json.getAsString() : null;
+        }
+    }
 }

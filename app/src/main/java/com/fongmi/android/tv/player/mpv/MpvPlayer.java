@@ -31,6 +31,7 @@ import androidx.media3.common.util.Util;
 import com.fongmi.android.tv.App;
 import com.fongmi.android.tv.bean.Sub;
 import com.fongmi.android.tv.cache.CacheLease;
+import com.fongmi.android.tv.player.PlaybackSpecs;
 import com.fongmi.android.tv.player.engine.PlayerEngine;
 import com.fongmi.android.tv.player.media.MediaItemFactory;
 import com.fongmi.android.tv.player.media.PlaySpec;
@@ -994,6 +995,40 @@ final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObserver, 
         } else {
             MpvLogCollector.log("MpvPlayer", "暂未取得视频尺寸，不能据此判断为纯音频");
         }
+    }
+
+    PlaybackSpecs getPlaybackSpecs() {
+        if (closed || !fileLoaded) return PlaybackSpecs.EMPTY;
+        Format video = PlaybackSpecs.selectedFormat(tracks, C.TRACK_TYPE_VIDEO);
+        Format audio = PlaybackSpecs.selectedFormat(tracks, C.TRACK_TYPE_AUDIO);
+        if (video != null && hasPlaybackSpecsDolbyVision(video.id)) {
+            // This display-only marker must not change track identities or saved selections.
+            video = video.buildUpon().setSampleMimeType(MimeTypes.VIDEO_DOLBY_VISION).build();
+        }
+        String pixelFormat = video == null ? null : propString("video-dec-params/hw-pixelformat", null);
+        if (TextUtils.isEmpty(pixelFormat) || "unknown".equals(pixelFormat)) {
+            pixelFormat = video == null ? null : propString("video-dec-params/pixelformat", null);
+        }
+        // Raw decoder input avoids reporting the display's tone mapping, scaling or audio downmix.
+        return PlaybackSpecs.fromMpv(video, audio,
+                video == null ? null : propString("video-dec-params/gamma", null),
+                pixelFormat,
+                audio == null ? null : propString("audio-params/channels", null));
+    }
+
+    private boolean hasPlaybackSpecsDolbyVision(@Nullable String trackId) {
+        if (trackId == null) return false;
+        int count = Math.min(propInt("track-list/count", 64), 64);
+        for (int i = 0; i < count; i++) {
+            String prefix = "track-list/" + i + "/";
+            String type = propString(prefix + "type", "");
+            if (type.isEmpty()) break;
+            if (!"video".equals(type)) continue;
+            if (!trackId.equals(propString(prefix + "id", ""))) continue;
+            if (!propBoolean(prefix + "selected")) return false;
+            return propInt(prefix + "dolby-vision-profile", -1) > 0;
+        }
+        return false;
     }
 
     private void markRenderedFirstFrame() {

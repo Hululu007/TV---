@@ -6,6 +6,7 @@ import androidx.media3.common.util.UnstableApi;
 
 import com.fongmi.android.tv.App;
 import com.fongmi.android.tv.bean.Sub;
+import com.fongmi.android.tv.player.PlaybackSpecs;
 import com.fongmi.android.tv.player.engine.PlayerEngine;
 import com.fongmi.android.tv.player.media.PlaySpec;
 import com.fongmi.android.tv.utils.MpvLogCollector;
@@ -55,6 +56,11 @@ public class MpvPlayerEngine implements PlayerEngine {
     @Override
     public Player getPlayer() {
         return player;
+    }
+
+    @Override
+    public PlaybackSpecs getPlaybackSpecs() {
+        return player.getPlaybackSpecs();
     }
 
     @Override
