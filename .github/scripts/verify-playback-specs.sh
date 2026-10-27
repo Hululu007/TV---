@@ -27,3 +27,19 @@ print(json.dumps(summary, indent=2))
 if not match:
     raise SystemExit('Playback specs instrumentation failed')
 PY
+
+# Keep a short real-time recording separate from the paused-frame screenshot assertions.
+adb shell screenrecord --time-limit 15 --size 1280x720 --bit-rate 4000000 \
+    /sdcard/playback-specs-demo.mp4 > "$out/screenrecord.txt" 2>&1 &
+record_pid=$!
+adb shell am instrument -w -r -e native_ui_evidence true \
+    -e class com.fongmi.android.tv.ui.PlaybackSpecsCapsuleTest#shouldRecordFrameMetricsForTheNaturalPresentation \
+    "$test_pkg/androidx.test.runner.AndroidJUnitRunner" | tee "$out/natural-demo.txt"
+wait "$record_pid" || true
+adb pull /sdcard/playback-specs-demo.mp4 "$out/playback-specs-demo.mp4"
+python3 - "$out/natural-demo.txt" <<'PY'
+from pathlib import Path
+import re, sys
+if not re.search(r'^OK \(1 test\)', Path(sys.argv[1]).read_text(), re.M):
+    raise SystemExit('Natural animation recording test failed')
+PY

@@ -1001,6 +1001,10 @@ final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObserver, 
         if (closed || !fileLoaded) return PlaybackSpecs.EMPTY;
         Format video = PlaybackSpecs.selectedFormat(tracks, C.TRACK_TYPE_VIDEO);
         Format audio = PlaybackSpecs.selectedFormat(tracks, C.TRACK_TYPE_AUDIO);
+        if (video != null && hasPlaybackSpecsDolbyVision(video.id)) {
+            // This display-only marker must not change track identities or saved selections.
+            video = video.buildUpon().setSampleMimeType(MimeTypes.VIDEO_DOLBY_VISION).build();
+        }
         String pixelFormat = video == null ? null : propString("video-dec-params/hw-pixelformat", null);
         if (TextUtils.isEmpty(pixelFormat) || "unknown".equals(pixelFormat)) {
             pixelFormat = video == null ? null : propString("video-dec-params/pixelformat", null);
@@ -1010,6 +1014,21 @@ final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObserver, 
                 video == null ? null : propString("video-dec-params/gamma", null),
                 pixelFormat,
                 audio == null ? null : propString("audio-params/channels", null));
+    }
+
+    private boolean hasPlaybackSpecsDolbyVision(@Nullable String trackId) {
+        if (trackId == null) return false;
+        int count = Math.min(propInt("track-list/count", 64), 64);
+        for (int i = 0; i < count; i++) {
+            String prefix = "track-list/" + i + "/";
+            String type = propString(prefix + "type", "");
+            if (type.isEmpty()) break;
+            if (!"video".equals(type)) continue;
+            if (!trackId.equals(propString(prefix + "id", ""))) continue;
+            if (!propBoolean(prefix + "selected")) return false;
+            return propInt(prefix + "dolby-vision-profile", -1) > 0;
+        }
+        return false;
     }
 
     private void markRenderedFirstFrame() {
@@ -1084,7 +1103,6 @@ final class MpvPlayer extends SimpleBasePlayer implements MPVLib.EventObserver, 
         int bitrate = propInt(prefix + "demux-bitrate", C.LENGTH_UNSET);
         if (bitrate > 0) builder.setAverageBitrate(bitrate);
         if (type == C.TRACK_TYPE_VIDEO) {
-            if (propInt(prefix + "dolby-vision-profile", -1) >= 0) builder.setSampleMimeType(MimeTypes.VIDEO_DOLBY_VISION);
             int width = propInt(prefix + "demux-w", C.LENGTH_UNSET);
             int height = propInt(prefix + "demux-h", C.LENGTH_UNSET);
             double frameRate = propDouble(prefix + "demux-fps", 0);
