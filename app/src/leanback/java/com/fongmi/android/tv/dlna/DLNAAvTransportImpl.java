@@ -7,6 +7,7 @@ import androidx.media3.common.Player;
 
 import com.fongmi.android.tv.App;
 import com.fongmi.android.tv.player.PlayerManager;
+import com.fongmi.android.tv.service.DLNARendererService;
 import com.fongmi.android.tv.ui.activity.CastActivity;
 import com.google.gson.reflect.TypeToken;
 
@@ -51,6 +52,7 @@ public class DLNAAvTransportImpl extends AbstractAVTransportService {
     private volatile long pendingSeekMs = -1;
     private volatile long cachedPosition = -1;
     private volatile long cachedDuration = -1;
+    private volatile String cachedSpeed = "1";
 
     public DLNAAvTransportImpl(Context context) {
         this.context = context;
@@ -72,6 +74,7 @@ public class DLNAAvTransportImpl extends AbstractAVTransportService {
         pendingSeekMs = -1;
         cachedPosition = -1;
         cachedDuration = -1;
+        cachedSpeed = "1";
         currentMetaData = "";
         currentPlayMode = PlayMode.NORMAL;
         fireStateChange(RenderState.IDLE);
@@ -80,6 +83,20 @@ public class DLNAAvTransportImpl extends AbstractAVTransportService {
     public void updatePositionCache(long position, long duration) {
         cachedPosition = position;
         cachedDuration = duration;
+        PlayerManager current = player;
+        if (current == null) return;
+        try {
+            cachedSpeed = formatSpeed(current.getSpeed());
+        } catch (RuntimeException ignored) {
+            cachedSpeed = "1";
+        }
+    }
+
+    private static String formatSpeed(float speed) {
+        if (!(speed > 0f) || Float.isNaN(speed) || Float.isInfinite(speed)) return "1";
+        int rounded = Math.round(speed);
+        if (rounded > 0 && Math.abs(speed - rounded) < 0.05f) return Integer.toString(rounded);
+        return "1";
     }
 
     public long consumePendingSeekMs() {
@@ -99,8 +116,12 @@ public class DLNAAvTransportImpl extends AbstractAVTransportService {
         this.nextMetaData = "";
         this.dlnaActive = false;
         this.pendingSeekMs = -1;
+        this.cachedPosition = -1;
+        this.cachedDuration = -1;
+        this.cachedSpeed = "1";
         this.currentURI = currentURI != null ? currentURI : "";
         this.currentMetaData = currentURIMetaData != null ? currentURIMetaData : "";
+        fireStateChange(this.currentURI.isEmpty() ? RenderState.IDLE : RenderState.PREPARING);
         startCastActivity(new CastAction(this.currentURI, this.currentMetaData, parseHeaders(this.currentMetaData)));
     }
 
@@ -129,7 +150,8 @@ public class DLNAAvTransportImpl extends AbstractAVTransportService {
 
     @Override
     public TransportInfo getTransportInfo(UnsignedIntegerFourBytes instanceId) {
-        String speed = (player != null && dlnaActive) ? String.valueOf(player.getSpeed()) : "1";
+        String speed = cachedSpeed;
+        if (speed == null || speed.isEmpty()) speed = "1";
         return new TransportInfo(currentState, TransportStatus.OK, speed);
     }
 
@@ -249,7 +271,8 @@ public class DLNAAvTransportImpl extends AbstractAVTransportService {
     private void startCastActivity(CastAction action) {
         Intent intent = new Intent(context, CastActivity.class);
         intent.putExtra(CastAction.KEY_EXTRA, action);
-        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        intent.putExtra(DLNARendererService.EXTRA_CAST_TOKEN, DLNARendererService.markCasting());
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
         context.startActivity(intent);
     }
 
